@@ -725,7 +725,7 @@ background:#5865f2;color:#fff;font-size:14px;text-decoration:none}
 #nav a:hover{background:rgba(255,255,255,.15)} #pg{display:inline-block;min-width:38px;text-align:center}
 </style></head><body>
 <div id="col"><div id="box">
-<div id="lang"><a id="discord" href="https://discord.gg/yACsX6HY98" target="_blank">Discord</a><select id="sel" onchange="setLang(this.value)" aria-label="Language"></select></div>
+<div id="lang"><a id="discord" href="https://discord.gg/2c6vSU4NYY" target="_blank">Discord</a><select id="sel" onchange="setLang(this.value)" aria-label="Language"></select></div>
 <div id="f">
 <label for="name" data-t="name"></label><input id="name" autocomplete="username" onkeydown="enter(event)">
 <label for="pw" data-t="password"></label><input id="pw" type="password" autocomplete="current-password" onkeydown="enter(event)">
