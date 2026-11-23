@@ -364,7 +364,22 @@ async function showPlayer(id) {
           : " The account has no password: the player cannot log in until you set one."))) return;
         try { await api("UnlinkSteam", {accountId: id}); toast("Steam account unlinked, player logged out"); reload(); }
         catch (e) { toast(e.message, false); }
-      }}, "Unlink Steam")) : h("p", {class: "muted"}, "No Steam account linked."),
+      }}, "Unlink Steam")) : (() => {
+        const sid = h("input", {placeholder: "SteamID64 or profile URL", size: 26});
+        const take = h("input", {type: "checkbox"});
+        return h("div", {class: "form"}, h("span", {class: "muted"}, "No Steam account linked."),
+          h("label", {}, "SteamID", sid),
+          h("label", {}, take, " Take over if linked elsewhere"),
+          h("button", {class: "btn primary", onclick: async () => {
+            if (take.checked && !confirm("Move this SteamID from the account that has it? That account loses its Steam login.")) return;
+            try {
+              const d = await api("LinkSteam", {accountId: id, steamId: sid.value, force: take.checked});
+              toast("Steam account linked" + (d.Persona ? ` (${d.Persona})` : "")
+                + (d.MovedFrom ? `, taken over from ${d.MovedFrom}` : "") + ", player logged out");
+              reload();
+            } catch (e) { toast(e.message, false); }
+          }}, "Link Steam"));
+      })(),
     h("div", {class: "form"}, h("label", {}, "Password", pw),
       h("button", {class: "btn primary", onclick: async () => {
         try { await api("SetPassword", {accountId: id, password: pw.value});

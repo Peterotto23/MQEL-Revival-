@@ -1593,6 +1593,7 @@ class GameHandler(BaseHTTPRequestHandler):
                 result = self._launcher_session(name)
             else:  # neuer Spieler oder Altspieler, der seinen Account verknüpft
                 result = {"Proof": auth_.steam_proof(steam_id)}
+                print(f"    [steam] SteamID {steam_id} verified, no linked account", flush=True)
         except steam_auth.SteamError as e:
             result = {"Error": str(e)}
         payload = json.dumps(result).replace("<", "\\u003c")

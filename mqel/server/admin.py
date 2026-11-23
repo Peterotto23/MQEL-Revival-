@@ -36,6 +36,7 @@ import notifications
 import profiles
 import server_stats
 import special_packs
+import steam_auth
 import tracking
 import trophies
 import website
@@ -670,6 +671,33 @@ class AdminService:
         removed = self.players.auth.unlink_steam(p.name)
         self.players.auth.logout(p.name)
         return {"Removed": removed}
+
+    def LinkSteam(self, args):
+        """Link a SteamID to the account by hand (e.g. after an accidental
+        unlink). steamId: SteamID64 or steamcommunity.com/profiles/<id> URL.
+        force: take the SteamID over from another account (that account
+        loses its Steam login) or replace a different SteamID on this one.
+        Ends the player's session."""
+        p, _ = self._account(args["accountId"])
+        steam_id = auth.parse_steam_id(args["steamId"])
+        if steam_id is None:
+            raise AdminError(400, "Not a SteamID64 (17 digits starting with 7656) or "
+                                  "steamcommunity.com/profiles/<id> URL")
+        auth_ = self.players.auth
+        try:
+            moved = auth_.link_steam_admin(p.name, steam_id, bool(args.get("force")))
+        except auth.AuthError as e:
+            if str(e) == "steam_taken":
+                raise AdminError(409, f"SteamID {steam_id} is already linked to "
+                                      f"\u201c{auth_.by_steam(steam_id)}\u201d. "
+                                      "Tick \u201cTake over\u201d to move it here.")
+            raise AdminError(409, f"{p.name} already has SteamID {auth_.steam_id(p.name)}. "
+                                  "Unlink it first or tick \u201cTake over\u201d.")
+        auth_.logout(p.name)
+        if moved:
+            auth_.logout(moved)
+        return {"Linked": steam_id, "MovedFrom": moved,
+                "Persona": steam_auth.persona(steam_id) if steam_auth.enabled() else ""}
 
     def SetAdmin(self, args):
         """Webtool-Zugang (admin true/false); verlangt ein Passwort."""

@@ -37,6 +37,17 @@ MIN_PASSWORD = 6
 TOKEN_BYTES = 18
 TOKEN_LENGTH = 24
 STEAM_PROOF_S = 600  # Gültigkeit des Beweises einer geprüften SteamID
+STEAM_ID_RE = re.compile(r"7656\d{13}")  # SteamID64 of an individual account
+
+
+def parse_steam_id(text):
+    """SteamID64 from a bare ID or a steamcommunity.com/profiles/<id> URL,
+    else None (vanity URLs /id/<name> cannot be resolved offline)."""
+    text = str(text or "").strip()
+    m = re.search(r"steamcommunity\.com/profiles/(\d+)", text)
+    if m:
+        text = m.group(1)
+    return text if STEAM_ID_RE.fullmatch(text) else None
 
 
 def chat_password(token):
@@ -143,6 +154,27 @@ class Auth:
             if had:
                 self._save()
             return had
+
+    def link_steam_admin(self, name, steam_id, force=False):
+        """Link steam_id to the account `name` without a login proof (web
+        tool). Returns the name of the account the SteamID was taken from,
+        or None. Without force, a SteamID that belongs to another account
+        or an account that already has a different SteamID is refused
+        (AuthError steam_taken / steam_other)."""
+        with self.lock:
+            user = self.users.setdefault(name, {})
+            if user.get("SteamId") not in (None, steam_id) and not force:
+                raise AuthError("steam_other")
+            owner = self._by_steam(steam_id)
+            moved = None
+            if owner not in (None, name):
+                if not force:
+                    raise AuthError("steam_taken")
+                self.users[owner].pop("SteamId", None)
+                moved = owner
+            user["SteamId"] = steam_id
+            self._save()
+            return moved
 
     def steam_proof(self, steam_id):
         """Beweis für die Login-Seite, dass der Server diese SteamID geprüft
