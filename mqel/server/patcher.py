@@ -344,7 +344,15 @@ def _settings_bin(crc):
     original = _read(os.path.join(ROOT, "client", "GameData", *SETTINGS_BIN.split("/")))
     if not crc:
         return original
-    return balance.settings_bin(original, balance.history(crc))
+    try:
+        return balance.settings_bin(original, balance.history(crc))
+    except Exception as e:  # noqa: BLE001 - Boundary: a bad Economy patch must not block every launcher
+        # Without this, one mismatch in settings.bin makes GetRMLauncherAndPackagesVersion
+        # answer 500 for every player. Serve the original file instead and say so loudly.
+        # (lru_cache keeps this result until the server restarts.)
+        print(f"[patcher] !!! settings.bin B{crc} could not be built, serving the ORIGINAL: {e!r}",
+              flush=True)
+        return original
 
 
 def _data_bin_files(version):

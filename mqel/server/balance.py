@@ -94,7 +94,7 @@ def fields():
             "Label": "Hours per bling", "Help": "Original: 1"},
         ("Mine", "Capacity"): {
             "Default": 42, "Min": 1, "Max": 1000, "Kind": "data",
-            "Label": "Capacity", "Help": "Original: 25"},
+            "Label": "Capacity", "Help": "Original: 42"},
         ("Mine", "Price"): {
             "Default": 500, "Min": 0, "Max": 5000, "Kind": "data",
             "Label": "Price (blings)", "Help": "Shop price of a mine. Original: 999"},
@@ -311,12 +311,14 @@ BLING_AMOUNT = re.compile(rb'("CurrencyType":(?:"PremiumCash"|1),\s*"Amount":)(\
 
 
 def _mine_text(text, cv):
-    for old, new in ((b'"ProductionPeriod":"1h"',
-                      b'"ProductionPeriod":"%dh"' % cv["Mine.ProductionHours"]),
-                     (b'"Capacity":25,', b'"Capacity":%d,' % cv["Mine.Capacity"])):
-        if text.count(old) != 1:
-            raise RuntimeError(f"settings.bin: {old!r} not unique")
-        text = text.replace(old, new)
+    # Match the number, not the original value: the Steam settings.bin has Capacity 42
+    # (the loose 2015 JSON says 25), and the hours may already differ from 1.
+    for pattern, new in ((rb'"ProductionPeriod":"\d+h"',
+                          b'"ProductionPeriod":"%dh"' % cv["Mine.ProductionHours"]),
+                         (rb'"Capacity":\d+', b'"Capacity":%d' % cv["Mine.Capacity"])):
+        if len(re.findall(pattern, text)) != 1:
+            raise RuntimeError(f"settings.bin: {pattern!r} not unique")
+        text = re.sub(pattern, lambda m, new=new: new, text)
     return text
 
 
