@@ -58,6 +58,7 @@ def lzo_decompress(src):
             out.append(out[m + k])
 
     state = "loop"
+    t = 0  # jeder Übergang nach "match" setzt t zuvor; Startwert nur für den Typprüfer
     if src[0] > 17:
         t = src[0] - 17
         ip = 1

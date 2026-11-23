@@ -6,6 +6,7 @@ Felder aus dem AccountPublicProfile-Leser des Clients (0xa89ff0).
 import functools
 import json
 import os
+from typing import Any
 
 import achievements as ach_rules
 import castles
@@ -75,14 +76,14 @@ ACHIEVEMENT_TYPES = ["None", "DefeatCastle", "KillEntities", "ReachLevel",
                      "CastlePillaged"]
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def achievement_specs():
     path = os.path.join(loot.SETTINGS, "GeneralSettings", "AchievementSettings.json")
     with open(path, encoding="utf-8") as f:
         return json.load(f)["Achievements"]
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _texts():
     """Englische Oasis-Texte (Titel/Beschreibung der Errungenschaften)."""
     path = os.path.join(loot.SETTINGS, "Oasis", "oasis_en.json")
@@ -122,7 +123,7 @@ def public_profile(a, guild_header=None):
     hero = next((h for h in a.get("Heroes") or []
                  if h["HeroSpecContainerId"] == a.get("SelectedHeroId")),
                 (a.get("Heroes") or [{}])[0])
-    stats = dict(build.get("CastleStats") or {"$type": T("CastleStats")})
+    stats: dict[str, Any] = dict(build.get("CastleStats") or {"$type": T("CastleStats")})
     stats.update(TotalConstructionPoints=castles.total_construction_points(draft),
                  MaxConstructionPoints=castles.max_construction_points(draft, build.get("Level", 1)),
                  TrapCount=sum(len(r.get("Traps") or []) for r in draft.get("Rooms") or []))

@@ -7,17 +7,17 @@ je Kreatur würfelt loot.py beim Start; EndAttack rechnet ab, was der Client
 als eingesammelt meldet.
 """
 
-import copy
 import json
 import os
 import random
 import time
+from typing import Any
 
 import castles
 import item_drops
-from account_state import INVENTORY_SLOTS_PER_TAB
 import loot
 import trophies
+from account_state import INVENTORY_SLOTS_PER_TAB
 
 T = castles.T
 
@@ -51,9 +51,10 @@ class AttackSession:
     gutgeschrieben (prize)."""
 
     def __init__(self):
-        self.current = {}
-        self.prize = None
-        self.rated_castle = None  # Burg des zuletzt beendeten Angriffs (RateCastle)
+        self.current: dict[str, Any] = {}
+        self.prize: Any = None
+        self.rated_castle: Any = None  # Burg des zuletzt beendeten Angriffs (RateCastle)
+
 
 RESURRECTION = os.path.join(castles.ROOT, "client", "GameData", "Data",
                             "GameplaySettings", "GeneralSettings",
@@ -123,7 +124,7 @@ def _castle(c):
     als bloßes Castle fehlt ihm das Burg-Level (Kreaturen mit AutoLevelUp
     bekamen negative Level).
     """
-    out = {"$type": T("UbisoftCastle")}
+    out: dict[str, Any] = {"$type": T("UbisoftCastle")}
     out.update((k, v) for k, v in c.items() if k != "$type" and not k.startswith("_"))
     for kind in ("Creature", "Trap"):
         out[kind + "Tiers"] = _tiers(c, kind)
@@ -299,25 +300,35 @@ def start_attack(account, body, session, boosts=([], {}), delegated=None):
                        c, hero["HeroSpecContainerId"], hero["Level"])
     belt = attack_belt(hero)
     trap_items = _custom_trap_items(custom, hero["HeroSpecContainerId"])
-    session.current = dict(castle=c, hero=hero["HeroSpecContainerId"],
-                    hero_level=hero["Level"], resurrections=0,
-                    attack_id="%024x" % random.getrandbits(96),
-                    started=time.monotonic(),  # Zeitprüfung (anticheat)
-                    loot=creature_loot, treasure=(tr_gold, tr_lf),
-                    items=items, treasure_item=tr_item, buildings=buildings,
-                    material_mines=materials,
-                    trap_items=trap_items, validation=validation, practice=practice,
-                    delegated=bool(delegated),
-                    completion_reward=castles.validation_reward(delegated),
-                    attack_type=body.get("attackType", 0),
-                    competition=body.get("ubisoftCompetitionId", 0),
-                    revenge=_revenge_id(account, body, practice),
-                    targeted=is_targeted(body.get("attackType", 0),
-                                         body.get("attackSource", 0), c),
-                    boosts=boosts[1], shielded=shielded,
-                    par=0.0 if validation else castles.par_time(c),
-                    trophies=((0, 0, 0) if practice else
-                              trophies.variation(account, c, hero["HeroSpecContainerId"])))
+    session.current = {
+        "castle": c,
+        "hero": hero["HeroSpecContainerId"],
+        "hero_level": hero["Level"],
+        "resurrections": 0,
+        "attack_id": f"{random.getrandbits(96):024x}",
+        "started": time.monotonic(),  # Zeitprüfung (anticheat)
+        "loot": creature_loot,
+        "treasure": (tr_gold, tr_lf),
+        "items": items,
+        "treasure_item": tr_item,
+        "buildings": buildings,
+        "material_mines": materials,
+        "trap_items": trap_items,
+        "validation": validation,
+        "practice": practice,
+        "delegated": bool(delegated),
+        "completion_reward": castles.validation_reward(delegated),
+        "attack_type": body.get("attackType", 0),
+        "competition": body.get("ubisoftCompetitionId", 0),
+        "revenge": _revenge_id(account, body, practice),
+        "targeted": is_targeted(body.get("attackType", 0),
+                                body.get("attackSource", 0), c),
+        "boosts": boosts[1],
+        "shielded": shielded,
+        "par": 0.0 if validation else castles.par_time(c),
+        "trophies": ((0, 0, 0) if practice else
+                     trophies.variation(account, c, hero["HeroSpecContainerId"])),
+    }
     return {
         "$type": T("AttackInfo"),
         # Spielerburgen: Held wird aufs Burg-Level herabgestuft
@@ -590,13 +601,29 @@ def stars(params, cur):
     return 1 + (t < par) + mine_star
 
 
-def end_attack(account, params, session):
+def boss_raid_blings(account, cur, params, suspicious=False):
+    """Repeatable boss payout (balance "Boss"): blings for a won raid
+    (CompletionType TreasureRoom, like objectives and complete_boss_region)
+    on a region's boss dungeon, on every clear. Not for practice, tests of
+    own/delegated castles, tutorial, competitions, a fight the anticheat
+    flagged, or player castles that happen to share a boss's id."""
+    c = cur.get("castle") or {}
+    if (suspicious or cur.get("practice") or cur.get("competition")
+            or c.get("IsTutorialCastle")
+            or castles.castle_type(c) != castles.CASTLE_TYPE_UBISOFT
+            or params.get("CompletionType") != 0):
+        return 0
+    return loot.boss_bounty(account, c.get("AccountId"), time.time())
+
+
+def end_attack(account, params, session, suspicious=False):
     """(EndAttackInfo, Gutschrift) für EndAttack.
 
     Gutschrift nur für das, was der Client als eingesammelt meldet
     (Looted*CreatureIds, KilledCreatureIds für XP, Schatzkammer-Beträge,
     gedeckelt auf das beim Start Angebotene). Ein EndAttack ohne
-    laufenden Angriff bringt nichts.
+    laufenden Angriff bringt nichts. suspicious: der Kampf fiel der
+    Cheat-Erkennung auf (keine Boss-Prämie).
     """
     cur = session.current
     c = cur.get("castle") or {}
@@ -609,6 +636,8 @@ def end_attack(account, params, session):
     # Bling-Beute: der Client meldet keine eigene Id-Liste, Blings fallen
     # wie XP beim Töten an
     kills_blings = _sum(cur, "PremiumCash", params.get("KilledCreatureIds"))
+    # Boss-Prämie: je gewonnenem Raid auf die Bossburg einer Region
+    boss_blings = boss_raid_blings(account, cur, params, suspicious)
     if c.get("IsTutorialCastle"):
         # Tutorial: XP aller Kreaturen, auch bei Niederlage oder Abbruch (das
         # Tutorial geht trotzdem weiter). Danach soll der Held Level 2 haben
@@ -648,8 +677,9 @@ def end_attack(account, params, session):
              "InGameCoin": (kills_gold + league_gold + tr_gold + boost_gold
                             + mines["InGameCoin"]),
              "LifeForce": kills_lf + league_lf + tr_lf + boost_lf + mines["LifeForce"],
-             "PremiumCash": mines["PremiumCash"] + kills_blings,
+             "PremiumCash": mines["PremiumCash"] + kills_blings + boss_blings,
              "bling_loot": kills_blings,
+             "boss_bounty": boss_blings,
              "Xp": kills_xp + boost_xp,
              "castle_id": c.get("AccountId"),
              "validation": cur.get("validation", False),

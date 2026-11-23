@@ -74,7 +74,8 @@ def _cpu_limit():
     period = _read("/sys/fs/cgroup/cpu/cpu.cfs_period_us") or _read("/sys/fs/cgroup/cpu,cpuacct/cpu.cfs_period_us")
     if quota and period and int(quota) > 0:
         return int(quota) / int(period)
-    return len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count()
+    affinity = getattr(os, "sched_getaffinity", None)  # nur Linux
+    return len(affinity(0)) if affinity else (os.cpu_count() or 1)
 
 
 class CpuSampler:
@@ -125,7 +126,7 @@ def memory():
         k, _, v = line.partition(":")
         info[k] = int(v.split()[0]) * 1024
     total = info.get("MemTotal")
-    if limit and limit.isdigit() and (not total or int(limit) < total):
+    if used and limit and limit.isdigit() and (not total or int(limit) < total):
         total = int(limit)
         free = total - int(used)
         # Seitencache zählt zu memory.current, ist aber freigebbar
@@ -151,7 +152,8 @@ def dir_size(path):
 
 def collect(state_dir):
     disk = shutil.disk_usage(state_dir)
-    load = os.getloadavg() if hasattr(os, "getloadavg") else None
+    getloadavg = getattr(os, "getloadavg", None)  # nicht unter Windows
+    load = getloadavg() if getloadavg else None
     host_up = _read("/proc/uptime")
     return {"Cpu": cpu(), "HostLoad": [round(x, 2) for x in load] if load else None,
             "Memory": memory(),

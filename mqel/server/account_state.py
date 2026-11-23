@@ -13,7 +13,6 @@ den Account zurück.
 import collections
 import copy
 import datetime
-import time
 import functools
 import glob
 import json
@@ -22,21 +21,24 @@ import os
 import random
 import re
 import threading
+import time
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 import achievements
 import balance
 import castle_sale
 import castles
-import item_drops
 import competitions
 import free_trials
+import item_drops
 import leagues
 import loot
 import objectives
 import profiles
 import special_packs
-import trophies
 import tracking
+import trophies
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Profil -> Vorlage für neue Accounts (server/stubs/); die Spieler liegen
@@ -55,7 +57,7 @@ CONTRACTS = "HyperQuest.GameServer.Contracts"
 
 
 def T(name):
-    return "%s.%s, %s" % (CONTRACTS, name, CONTRACTS)
+    return f"{CONTRACTS}.{name}, {CONTRACTS}"
 
 
 # HeroItemSlot des Update3-Clients (ohne Finger2). Verifiziert per
@@ -71,11 +73,11 @@ CLIENT_SLOTS = {1: "Head", 2: "Shoulders", 3: "Body", 4: "Back", 5: "Neck",
 IGNORED = {"TrackingCommand", "ClientIdleCommand", "LogoutCommand",
            "SetLastViewedDefendLogCommand"}
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _hero_spells(hero_spec):
     """[(Zauber-Id, [HeroMinimumLevel je Stufe])] eines Helden."""
     root = loot.SETTINGS
-    path = glob.glob(os.path.join(root, "Heroes", "%06d - *" % hero_spec,
+    path = glob.glob(os.path.join(root, "Heroes", f"{hero_spec:06d} - *",
                                   "Gameplay.json"))
     if not path:
         return ()
@@ -84,7 +86,7 @@ def _hero_spells(hero_spec):
                         if "AllowedSpells" in c), [])
     out = []
     for sid in allowed:
-        p = glob.glob(os.path.join(root, "Abilities", "%06d - *" % sid,
+        p = glob.glob(os.path.join(root, "Abilities", f"{sid:06d} - *",
                                    "Gameplay.json"))
         if not p:
             continue
@@ -95,11 +97,11 @@ def _hero_spells(hero_spec):
     return tuple(out)
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _equipment_spec(hero_spec):
     """HeroEquipmentDefinitionSpec aus Heroes/<Held>/Gameplay.json
     (DefaultEquipmentTemplateIds, HeroItemTypes)."""
-    path = glob.glob(os.path.join(loot.SETTINGS, "Heroes", "%06d - *" % hero_spec,
+    path = glob.glob(os.path.join(loot.SETTINGS, "Heroes", f"{hero_spec:06d} - *",
                                   "Gameplay.json"))
     if not path:
         return {}
@@ -107,10 +109,10 @@ def _equipment_spec(hero_spec):
                  .endswith(".HeroEquipmentDefinitionSpec")), {})
 
 
-@functools.lru_cache(maxsize=None)
-def _assignment_actions(assignment_id):
+@functools.cache
+def _assignment_actions(assignment_id) -> tuple[dict[str, Any], ...]:
     path = glob.glob(os.path.join(loot.SETTINGS, "Assignments",
-                                  "%06d - *" % assignment_id, "Gameplay.json"))
+                                  f"{assignment_id:06d} - *", "Gameplay.json"))
     if not path:
         return ()
     with open(path[0], encoding="utf-8") as f:
@@ -118,7 +120,7 @@ def _assignment_actions(assignment_id):
     return tuple((spec[0] if isinstance(spec, list) else spec).get("Actions", []))
 
 
-def _assignment_action(assignment_id, index):
+def _assignment_action(assignment_id, index) -> dict[str, Any] | None:
     actions = _assignment_actions(assignment_id)
     return actions[index] if 0 <= index < len(actions) else None
 
@@ -220,7 +222,7 @@ class AccountState:
         self.events = []  # (NotificationType-Name, Felder) aus Commands
         self.overflow = []  # BuyBackAdded für Beute bei vollem Inventar, noch nicht gemeldet
         self.spells_unlocked = []  # durch Levelaufstieg, noch nicht gemeldet
-        self.track = None  # (TrackingTagId, Felder) -> Tracking, setzt players.Player
+        self.track: Callable[..., Any] | None = None  # (TrackingTagId, Felder) -> Tracking, setzt players.Player
         self.data = GameData()
         self.log = log
         # Kontobuch der Blings (docs/70-bling-wirtschaft.md): jede Änderung
@@ -438,7 +440,7 @@ class AccountState:
             os.makedirs(os.path.dirname(self.ledger), exist_ok=True)
             with open(self.ledger, "a", encoding="utf-8") as f:
                 f.write(json.dumps({
-                    "Time": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "Time": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "Delta": now - self._blings, "Balance": now,
                     "Source": source or "server",
                     **({"Kinds": self._kinds} if self._kinds else {})}) + "\n")
@@ -684,12 +686,12 @@ class AccountState:
                     changed = True
                     if name in self.DRAFT_COMMANDS:
                         self.account["BuildInfo"]["IsDraftPublished"] = False
-                    self._book("%s cmd:%s" % (getattr(SOURCE, "value", None) or "", name))
-                    if tag:
+                    self._book(f"{getattr(SOURCE, 'value', None) or ''} cmd:{name}")
+                    if tag and self.track:
                         delta = {f: self.account["Wallet"].get(f, 0) - v
                                  for f, v in before.items()}
                         self.track(tag, dict(cmd, Command=name, WalletDelta=delta))
-                except Exception as e:  # ein kaputtes Command killt nie den Server
+                except Exception as e:  # noqa: BLE001 - ein kaputtes Command killt nie den Server
                     self.log(f"    [state] {name} fehlgeschlagen: {e!r}")
             if changed:
                 self._settle_forged_weapon()
@@ -805,9 +807,13 @@ class AccountState:
             wallet = {field: self._credit(field, gains.get(field, 0))
                       for field in ("InGameCoin", "LifeForce", "PremiumCash")}
             loot.record_bling_loot(self.account, gains.get("bling_loot", 0), time.time())
-            self._tag("loot", min(wallet["PremiumCash"], gains.get("bling_loot", 0)))
-            self._tag("pillage", wallet["PremiumCash"] - min(wallet["PremiumCash"],
-                                                             gains.get("bling_loot", 0)))
+            loot.record_boss_bounty(self.account, gains.get("boss_bounty", 0), time.time())
+            blings = wallet["PremiumCash"]
+            from_loot = min(blings, gains.get("bling_loot", 0))
+            from_boss = min(blings - from_loot, gains.get("boss_bounty", 0))
+            self._tag("loot", from_loot)
+            self._tag("boss", from_boss)
+            self._tag("pillage", blings - from_loot - from_boss)
             potions = []
             # Validierungslauf verbraucht keine Tränke (Hinweis im Client)
             if gains["hero"] is not None and not gains.get("validation"):
@@ -924,7 +930,7 @@ class AccountState:
         with self.lock:
             last = self.account.get("LastSeenOnline")
             gap = (now - datetime.datetime.strptime(last, "%Y-%m-%dT%H:%M:%SZ").replace(
-                tzinfo=datetime.timezone.utc)).total_seconds() if last else None
+                tzinfo=datetime.UTC)).total_seconds() if last else None
             if gap is not None and gap < 300:
                 return
             if gap is not None and gap <= self.PLAY_GAP:
@@ -960,7 +966,7 @@ class AccountState:
             self.account["TargetedAttackAvailableCount"] = max(0, count - 1)
             if not self._reload_expirable():
                 e = {"$type": T("TargetedAttackExpirable"),
-                     "Id": "%024x" % random.getrandbits(96),
+                     "Id": f"{random.getrandbits(96):024x}",
                      "ExpirableType": "TargetedAttackReload",
                      "DueDate": (now + datetime.timedelta(seconds=reload)).strftime(
                          "%Y-%m-%dT%H:%M:%SZ")}
@@ -980,7 +986,7 @@ class AccountState:
             if not e:
                 return out
             parse = lambda d: datetime.datetime.strptime(d, "%Y-%m-%dT%H:%M:%SZ").replace(
-                tzinfo=datetime.timezone.utc)
+                tzinfo=datetime.UTC)
             due = parse(e["DueDate"])
             count = self.account.get("TargetedAttackAvailableCount", max_count)
             while due <= now and count < max_count:
@@ -1007,11 +1013,12 @@ class AccountState:
     # (Faktor = Template-Feld) rechnet attack.end_attack, Magic Find wirkt
     # beim Würfeln der Kreatur-Drops in attack.start_attack.
 
-    BOOST_FIELDS = {"XpBoost": ("Xp", "IncreasedXp"),
-                    "GoldBoost": ("Gold", "AttackIncreasedGold"),
-                    "LifeForceBoost": ("LifeForce", "AttackIncreasedLifeForce"),
-                    "MagicFindBoost": ("MagicFind", "IncreasedChance"),
-                    "CastleDPSBoost": (None, None)}
+    BOOST_FIELDS: ClassVar[dict[str, tuple[Any, Any]]] = {
+        "XpBoost": ("Xp", "IncreasedXp"),
+        "GoldBoost": ("Gold", "AttackIncreasedGold"),
+        "LifeForceBoost": ("LifeForce", "AttackIncreasedLifeForce"),
+        "MagicFindBoost": ("MagicFind", "IncreasedChance"),
+        "CastleDPSBoost": (None, None)}
 
     @staticmethod
     def _consumable_type(template):
@@ -1033,8 +1040,8 @@ class AccountState:
         self._consume_one(slot)
         self._end_consumable(ctype)
         seconds = castles.duration(template["Duration"])
-        now = datetime.datetime.now(datetime.timezone.utc)
-        eid = "%024x" % random.getrandbits(96)
+        now = datetime.datetime.now(datetime.UTC)
+        eid = f"{random.getrandbits(96):024x}"
         expirable = {"$type": T("ConsumableExpirable"), "Id": eid,
                      "ExpirableType": "Consumable",
                      "DueDate": (now + datetime.timedelta(seconds=seconds)).strftime(
@@ -1155,7 +1162,7 @@ class AccountState:
         with self.lock:
             out = [("ShieldExpired", {"ExpirableId": x["Id"]})
                    for x in self._drop_shield_expirables()]
-            e = {"$type": T("ShieldEndExpirable"), "Id": "%024x" % random.getrandbits(96),
+            e = {"$type": T("ShieldEndExpirable"), "Id": f"{random.getrandbits(96):024x}",
                  "ExpirableType": "ShieldEnd",
                  "DueDate": (now + datetime.timedelta(seconds=seconds)).strftime(
                      "%Y-%m-%dT%H:%M:%SZ")}
@@ -1286,9 +1293,9 @@ class AccountState:
             if self.account["Wallet"][field] < price["Amount"]:
                 raise ValueError(f"zu wenig {field}")
             self.account["Wallet"][field] -= price["Amount"]
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         e = {"$type": T("CastleValidationDelegationExpirable"),
-             "Id": "%024x" % random.getrandbits(96),
+             "Id": f"{random.getrandbits(96):024x}",
              "ExpirableType": "CastleValidationDelegation",
              "DueDate": (now + self.DELEGATION_DURATION).strftime("%Y-%m-%dT%H:%M:%SZ")}
         self.account.setdefault("Expirables", []).append(e)
@@ -1300,7 +1307,7 @@ class AccountState:
             "MineStatuses": copy.deepcopy(build.get("MineStatuses") or {})}
         self.events.append(("ExpirableAdded", {"Expirable": dict(e)}))
         self.log(f"    [state] Validierung delegiert (Region {sku['ItemId']}, "
-                 f"{'Clan' if not price else '-%d' % price['Amount']}) bis {e['DueDate']}")
+                 f"{'Clan' if not price else '-' + str(int(price['Amount']))}) bis {e['DueDate']}")
 
     def delegation(self):
         """Offenes Validierungs-Ticket (Kopie) oder None."""
@@ -1370,8 +1377,9 @@ class AccountState:
     # Inventory.ForgedItem: null = leer; sonst {ExpirableId, ForgeMode,
     # Item, ItemLevelAverage} mit ForgeExpirable bis zum Fertigstellen.
 
-    FORGE_MODES = {16: ("Crafted", "CraftTable"), 17: ("Reforged", "ReforgeTable"),
-                   24: ("Upgraded", "UpgradeTable")}
+    FORGE_MODES: ClassVar[dict[int, tuple[str, str]]] = {
+        16: ("Crafted", "CraftTable"), 17: ("Reforged", "ReforgeTable"),
+        24: ("Upgraded", "UpgradeTable")}
 
     def _cmd_ForgeCraftCommand(self, cmd):
         self._forge(cmd, 16)
@@ -1435,6 +1443,8 @@ class AccountState:
         if mode == "Reforged":  # gleicher Typ wie das Ausgangsteil
             item = item_drops.reforge_item(source, level, quality)
         elif mode == "Upgraded":  # dasselbe Teil, Level + Zuschlag
+            if source is None:
+                raise ValueError("Aufwerten ohne Ausgangsteil")
             level = min(source["ItemLevel"] + bonus, settings["MaxForgeItemLevel"])
             item = item_drops.upgrade_item(source, level, settings["PropertyLevelUpChances"])
         else:
@@ -1465,8 +1475,8 @@ class AccountState:
             self.events.append(("HeroEquipmentUnequip", {"HeroItemSlot": number,
                                                          "HeroSpecContainerId": hero}))
 
-        now = datetime.datetime.now(datetime.timezone.utc)
-        eid = "%024x" % random.getrandbits(96)
+        now = datetime.datetime.now(datetime.UTC)
+        eid = f"{random.getrandbits(96):024x}"
         expirable = {"$type": T("ForgeExpirable"), "Id": eid, "ExpirableType": "Forge",
                      "ForgeMode": mode,
                      "DueDate": (now + datetime.timedelta(
@@ -1517,8 +1527,8 @@ class AccountState:
         """Sofort-Fertigstellung: Preis der höchsten Schwelle <= Restzeit
         (TimeController::CalculateAcceleratorPrice)."""
         due = datetime.datetime.strptime(due_date, "%Y-%m-%dT%H:%M:%SZ").replace(
-            tzinfo=datetime.timezone.utc)
-        left = (due - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
+            tzinfo=datetime.UTC)
+        left = (due - datetime.datetime.now(datetime.UTC)).total_seconds()
         if left <= 0:
             return
         cost = [r["Cost"] for r in self.data.time["TimeCostTable"]
@@ -1767,7 +1777,7 @@ class AccountState:
                "hero": None, "xp": 0, "level_changed": False}
         if not done:
             return out
-        now = datetime.datetime.now(datetime.timezone.utc).strftime(
+        now = datetime.datetime.now(datetime.UTC).strftime(
             "%Y-%m-%dT%H:%M:%SZ")
         by_id = {o["ObjectiveId"]: o for o in self.account["Objectives"]}
         items = []
@@ -1798,7 +1808,7 @@ class AccountState:
 
     def _unlock_objectives(self, ids):
         """Objectives als freigeschaltet eintragen; Einträge für ObjectiveUnlocked."""
-        now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        now = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         out = []
         for oid in ids:
             entry = {"$type": T("AccountObjective"), "HasViewed": False,
@@ -1882,7 +1892,7 @@ class AccountState:
                 (s for s in self._slots()
                  if s["Item"]["$type"] == T("HeroConsumableItem")
                  and s["Item"].get("TemplateId") == belt["TemplateId"]), None)
-            if stack is None:
+            if belt is None or stack is None:
                 self.log(f"    [state] Trank (Ability {ability}) benutzt, "
                          "aber keiner im Vorrat")
                 continue
@@ -2000,11 +2010,12 @@ class AccountState:
     # -- Tutorial (Neu-Account) ---------------------------------------------
 
     # HeroEquipmentDefinitionSpec.DefaultEquipmentTemplateIds -> Equipment-Slot
-    DEFAULT_EQUIPMENT_SLOTS = {"WeaponTemplateId": "MainHand",
-                               "HelmTemplateId": "Head",
-                               "ShouldersTemplateId": "Shoulders",
-                               "SuitOfArmorTemplateId": "Body",
-                               "GlovesTemplateId": "Hands"}
+    DEFAULT_EQUIPMENT_SLOTS: ClassVar[dict[str, str]] = {
+        "WeaponTemplateId": "MainHand",
+        "HelmTemplateId": "Head",
+        "ShouldersTemplateId": "Shoulders",
+        "SuitOfArmorTemplateId": "Body",
+        "GlovesTemplateId": "Hands"}
 
     def _default_equipment(self, hero_spec):
         """{Equipment-Slot: TemplateId} der Standard-Ausrüstung eines Helden."""
@@ -2026,8 +2037,8 @@ class AccountState:
         Ausrüstung aus Heroes/<Held>/Gameplay.json DefaultEquipmentTemplateIds
         (die "Default ..."-Items; so auch der MQELOffline-Nachbau)."""
         template = _load_json(glob.glob(os.path.join(
-            SETTINGS, "HeroTemplates", "%06d - *.json" % spec_id))[0])
-        equipment = {s: None for s in ("Back", "Body", "Costume", "Finger1",
+            SETTINGS, "HeroTemplates", f"{spec_id:06d} - *.json"))[0])
+        equipment: dict[str, Any] = {s: None for s in ("Back", "Body", "Costume", "Finger1",
                                        "Finger2", "Hands", "Head", "MainHand",
                                        "Neck", "OffHand", "Pet", "Shoulders")}
         for slot, tid in self._default_equipment(spec_id).items():
@@ -2111,7 +2122,7 @@ class AccountState:
         """Serverseitige Aktion eines Assignments: ausführen und bestätigen
         (ServerAssignmentActionCompleted, NotificationType 74; darauf wartet
         der Client)."""
-        action = _assignment_action(cmd["AssignmentId"], cmd["ActionIndex"])
+        action = _assignment_action(cmd["AssignmentId"], cmd["ActionIndex"]) or {}
         kind = action["$type"].split(",")[0].rsplit(".", 1)[-1] if action else None
         if kind == "SetCastleRenovationLevelAssignmentActionSpec":
             # Account.CastleRenovationLevel (DefaultAccount: "RenovationLevel0");
@@ -2153,7 +2164,7 @@ class AccountState:
     def _cmd_ObjectiveUnlockCommand(self, cmd):
         if self._objective(cmd["ObjectiveId"]) is not None:
             return
-        now = datetime.datetime.now(datetime.timezone.utc).strftime(
+        now = datetime.datetime.now(datetime.UTC).strftime(
             "%Y-%m-%dT%H:%M:%SZ")
         self.account["Objectives"].append({
             "$type": T("AccountObjective"), "HasViewed": False,
@@ -2245,7 +2256,7 @@ class AccountState:
         if sku["ItemType"] != 21:
             raise ValueError(f"BuyCommand: SKU-ItemType {sku['ItemType']} "
                              "nicht unterstützt")
-        now = datetime.datetime.now(datetime.timezone.utc).strftime(
+        now = datetime.datetime.now(datetime.UTC).strftime(
             "%Y-%m-%dT%H:%M:%SZ")
         fields = castle_sale.bought_castle(sku["ItemId"], self.account["AccountId"],
                                            self.account.get("DisplayName", ""), now)
@@ -2733,7 +2744,7 @@ class AccountState:
         # Laufzeit als Expirable; ohne den Eintrag verwirft der Client den
         # Boost beim Laden (Felder: Client-Leser DefenseIngredientBoostExpirable)
         seconds = castles.duration(castles.boost_spec(sku["ItemId"])["Duration"])
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         self.account.setdefault("Expirables", []).append({
             "$type": T("DefenseIngredientBoostExpirable"),
             "Id": cmd.get("ExpirableId") or NO_EXPIRABLE,
@@ -2871,7 +2882,7 @@ class AccountState:
         self.log(f"    [state] Gebäude {cmd['SpecContainerId']} (Id {bid}) gebaut, "
                  f"-{price['Amount']} {field}")
 
-    STORAGE_FIELDS = {3: "InGameCoin", 4: "LifeForce"}  # GoldStorage, LifeForceStorage
+    STORAGE_FIELDS: ClassVar[dict[int, str]] = {3: "InGameCoin", 4: "LifeForce"}  # GoldStorage, LifeForceStorage
 
     def _cmd_UpgradeBuildingCommand(self, cmd):
         """Gebäude ausbauen (SKU ItemType 10, ItemCount = Zielrang), ohne
@@ -2912,7 +2923,8 @@ class AccountState:
         if b["SpecContainerId"] == 1:
             self._unlock_buildings()
 
-    RANK_FIELDS = {1: "CastleHeartRank", 2: "WorkersCabinRank", 13: "ArchitectOfficeRank"}
+    RANK_FIELDS: ClassVar[dict[int, str]] = {
+        1: "CastleHeartRank", 2: "WorkersCabinRank", 13: "ArchitectOfficeRank"}
 
     def _set_building_rank(self, b, rank):
         """Rang setzen samt abhängiger Werte; meldet BuildingUpgradeCompleted."""
@@ -2991,7 +3003,7 @@ class AccountState:
         build = self.account["BuildInfo"]
         corpses = build.setdefault("HeroCorpses", [])
         meta = self.account.setdefault(self.CORPSES, {})
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         attacker = attacker_summary.get("Id")
         if any(m["Attacker"] == attacker and now - datetime.datetime.fromisoformat(
                 m["Died"]) < datetime.timedelta(days=1) for m in meta.values()):
@@ -3025,7 +3037,7 @@ class AccountState:
         """ElapsedTimeSinceDeath (Sekunden) der Heldenleichen im Account
         `payload` (Kopie für GetAccountInformation) aus dem Todeszeitpunkt."""
         meta = payload.get(self.CORPSES) or {}
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         for c in (payload.get("BuildInfo") or {}).get("HeroCorpses") or []:
             died = (meta.get(str(c["EntityHarvestId"])) or {}).get("Died")
             if died:
@@ -3060,10 +3072,10 @@ class AccountState:
             if defense["won"]:
                 build["TotalSuccessfulAttackCount"] = build.get("TotalSuccessfulAttackCount", 0) + 1
                 stats["SuccessfulAttackCount"] = stats.get("SuccessfulAttackCount", 0) + 1
-            entry = dict(defense["entry"], AttackerAccountSummary=attacker_summary,
+            entry: dict[str, Any] = dict(defense["entry"], AttackerAccountSummary=attacker_summary,
                          AttackerCastleLevel=attacker_summary.get("CastleLevel", 1),
                          AttackStartDateTime=datetime.datetime.now(
-                             datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+                             datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
             # inzwischen ausgegeben: nur das tatsächlich Verlorene eintragen
             for field, key in (("InGameCoin", "StolenIGC"), ("LifeForce", "StolenLifeForce")):
                 short = (defense.get("treasure") or {}).get(field, 0) + deltas.get(field, 0)
@@ -3091,7 +3103,7 @@ class AccountState:
         merken (bleibt bis RestoreMinesBuildingCommand), neu zerstörte Mine
         ohne laufenden Minenschild bekommt einen (MineShieldExpirable,
         MineLossPonderationTable); je Mine MinePillaged an den Besitzer."""
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         stamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
         shields = {e["Id"] for e in self.account.get("Expirables") or []
                    if e.get("ExpirableType") == "MineShield" and e["DueDate"] > stamp}
@@ -3118,7 +3130,7 @@ class AccountState:
         MineLossPonderationTable); [ExpirableAdded] oder []."""
         if seconds <= 0:
             return []
-        e = {"$type": T("MineShieldExpirable"), "Id": "%024x" % random.getrandbits(96),
+        e = {"$type": T("MineShieldExpirable"), "Id": f"{random.getrandbits(96):024x}",
              "ExpirableType": "MineShield", "BuildingId": bid,
              "DueDate": (now + datetime.timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")}
         self.account.setdefault("Expirables", []).append(e)
@@ -3164,7 +3176,7 @@ class AccountState:
                 if status.get("ProductionExpirableId", NO_EXPIRABLE) == NO_EXPIRABLE:
                     notes += self._start_material_production(
                         str(bid), status, specs[str(bid)],
-                        datetime.datetime.now(datetime.timezone.utc))
+                        datetime.datetime.now(datetime.UTC))
                 notes.append(self._material_completed(str(bid), status, 0))
         return notes
 
@@ -3286,11 +3298,10 @@ class AccountState:
     def _add_news(self, data):
         """News an den Account hängen (neueste zuerst, höchstens
         NewsMaxCount); Id zeitlich aufsteigend wie eine ObjectId."""
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         box = self.account.setdefault("News", {"$type": T("NewsResult"),
                                                "LastViewedNewsId": "", "News": []})
-        news = {"$type": T("News"), "Id": "%08x%016x" % (int(now.timestamp()),
-                                                        random.getrandbits(64)),
+        news = {"$type": T("News"), "Id": f"{int(now.timestamp()):08x}{random.getrandbits(64):016x}",
                 "Data": data, "IsUnread": True, "Priority": 1,
                 "PublishDate": now.strftime("%Y-%m-%dT%H:%M:%SZ")}
         box["News"] = [news] + self._current_news(box, now)[:NEWS_MAX - 1]
@@ -3301,7 +3312,7 @@ class AccountState:
         """News ohne die nach NewsTimeout abgelaufenen."""
         return [n for n in box.get("News") or []
                 if now - datetime.datetime.fromisoformat(
-                    n["PublishDate"].replace("Z", "+00:00")) < NEWS_TIMEOUT]
+                    n["PublishDate"]) < NEWS_TIMEOUT]
 
     def add_news(self, data):
         """News von außen (Freundes-News); liefert den Eintrag für NewsAdded."""
@@ -3315,7 +3326,7 @@ class AccountState:
         box = self.account.get("News")
         if box:
             box["News"] = self._current_news(
-                box, datetime.datetime.now(datetime.timezone.utc))
+                box, datetime.datetime.now(datetime.UTC))
 
     def _cmd_SetLastViewedNewsCommand(self, cmd):
         """News-Fenster geöffnet: alles bis zur Id gilt als gelesen."""
@@ -3449,12 +3460,12 @@ class AccountState:
         """Abgelaufene DefenseIngredientBoostExpirables entfernen und die
         BoostId an Kreatur/Falle zurücksetzen. Der Client zählt die Laufzeit
         selbst herunter; der Server räumt beim Laden des Accounts auf."""
-        now = now or datetime.datetime.now(datetime.timezone.utc)
+        now = now or datetime.datetime.now(datetime.UTC)
         keep, gone = [], []
         for e in self.account.get("Expirables") or []:
             due = e.get("DueDate")
             if (e.get("ExpirableType") == "DefenseIngredientBoost" and due
-                    and datetime.datetime.fromisoformat(due.replace("Z", "+00:00")) <= now):
+                    and datetime.datetime.fromisoformat(due) <= now):
                 gone.append(e)
             else:
                 keep.append(e)
@@ -3541,7 +3552,7 @@ class AccountState:
             status["ProductionExpirableId"] = NO_EXPIRABLE
             return []
         seconds = castles.duration(spec["ProductionPeriod"])
-        e = {"$type": T("MineProductionExpirable"), "Id": "%024x" % random.getrandbits(96),
+        e = {"$type": T("MineProductionExpirable"), "Id": f"{random.getrandbits(96):024x}",
              "ExpirableType": "MineProduction", "BuildingId": int(bid),
              "ProductionValue": spec["ProductionValue"], "DurationSeconds": seconds,
              "DueDate": (start + datetime.timedelta(seconds=seconds))
@@ -3573,7 +3584,7 @@ class AccountState:
         """Fällige Perioden der Material-O-Matics abrechnen (auch ältere
         Stände ohne Timer/Zutaten nachziehen); liefert die Meldungen
         (ExpirableAdded, MineProductionCompleted)."""
-        now = now or datetime.datetime.now(datetime.timezone.utc)
+        now = now or datetime.datetime.now(datetime.UTC)
         stamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
         notes = []
         for bid, status, spec in self._material_mines():
@@ -3601,7 +3612,7 @@ class AccountState:
                     status["Productionlevel"] = min(status["Productionlevel"] + 1, top)
                 self._upgrade_material_items(status, spec)
                 due = datetime.datetime.strptime(e["DueDate"], "%Y-%m-%dT%H:%M:%SZ").replace(
-                    tzinfo=datetime.timezone.utc)
+                    tzinfo=datetime.UTC)
                 notes += self._start_material_production(bid, status, spec, due)
                 e = next((x for x in self.account["Expirables"]
                           if x["Id"] == status["ProductionExpirableId"]), None)
@@ -3629,7 +3640,7 @@ class AccountState:
         status.update(CumulatedAmount=0, CumulatedHeroItems=[],
                       Productionlevel=spec.get("InitialLevel", 1))
         added = self._start_material_production(
-            bid, status, spec, datetime.datetime.now(datetime.timezone.utc))
+            bid, status, spec, datetime.datetime.now(datetime.UTC))
         occupied = self._occupied()
         self.events.append(("HarvestingCompleted", {"Result": {
             "$type": T("HarvestResult"), "EntityHarvestId": cmd["MineBuildingId"],
@@ -3852,7 +3863,7 @@ class AccountState:
 
     # InventoryType laut Client-Enum (Namen HeroInventory ... CastleRenovation;
     # belegt: 0 = Helden-Inventar, 6 = Materialsammlung der Burg-Renovierung)
-    INVENTORIES = {0: "HeroItems", 6: "CastleRenovationItems"}
+    INVENTORIES: ClassVar[dict[int, str]] = {0: "HeroItems", 6: "CastleRenovationItems"}
 
     def _inventory(self, kind):
         key = self.INVENTORIES.get(kind)
@@ -3934,7 +3945,7 @@ class AccountState:
     def _add_buyback(self, entry_id, item, count, price, timeout_key):
         """Gegenstand in den Rückkauf; liefert den Eintrag."""
         consumable = item.get("$type") == T("HeroConsumableItem")
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         entry = {"$type": T("ConsumableBuyBackSlot" if consumable
                             else "HeroEquipmentBuyBackSlot"),
                  "Id": entry_id,
@@ -3966,7 +3977,7 @@ class AccountState:
         (wie das Original, BuyBackTimeoutForInventoryFull), dem Client per
         BuyBackAdded gemeldet."""
         # Id wie die des Clients beim Verkauf (ObjectId-Form: Zeitstempel vorn)
-        entry_id = "%08x%016x" % (int(time.time()), random.getrandbits(64))
+        entry_id = f"{int(time.time()):08x}{random.getrandbits(64):016x}"
         entry = self._add_buyback(entry_id, item, count,
                                   {"Amount": 0, "CurrencyType": 2},
                                   "BuyBackTimeoutForInventoryFull")

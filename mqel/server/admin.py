@@ -23,14 +23,14 @@ import json
 import os
 import secrets
 import urllib.parse
+from typing import ClassVar
 
 import account_state
 import anticheat
 import auth
 import balance
-import chat_log
-import website
 import castles
+import chat_log
 import loot
 import notifications
 import profiles
@@ -38,6 +38,7 @@ import server_stats
 import special_packs
 import tracking
 import trophies
+import website
 
 # Zeitfenster der Signatur (Date-Header), gegen Wiederholen mitgeschnittener Aufrufe
 MAX_CLOCK_SKEW = 300
@@ -78,7 +79,7 @@ def _dotnet_url_encode(text):
         elif c == " ":
             out.append("+")
         else:
-            out.append("%%%02x" % b)
+            out.append(f"%{b:02x}")
     return "".join(out)
 
 
@@ -103,8 +104,8 @@ def authorized(keys, path_and_query, method, headers, now=None):
     except (TypeError, ValueError):
         return False
     if sent.tzinfo is None:
-        sent = sent.replace(tzinfo=datetime.timezone.utc)
-    now = now or datetime.datetime.now(datetime.timezone.utc)
+        sent = sent.replace(tzinfo=datetime.UTC)
+    now = now or datetime.datetime.now(datetime.UTC)
     if abs((now - sent).total_seconds()) > MAX_CLOCK_SKEW:
         return False
     expected = signature(path_and_query, method, date, key_id, secret)
@@ -132,7 +133,7 @@ def _consumable_name(template, template_id):
     """Anzeigename eines Verbrauchsguts: Art aus dem Template-Typ (ohne
     Namen in den Settings), z. B. "HealthPotion 1", "CraftingMaterial 1002"."""
     kind = template.get("$type", "?").split(",")[0].split(".")[-1]
-    return "%s %s" % (kind.replace("ConsumableTemplate", ""), template_id)
+    return f"{kind.replace('ConsumableTemplate', '')} {template_id}"
 
 
 def _email(token):
@@ -168,8 +169,14 @@ class AdminService:
     def _account(self, account_id):
         p = self.players.by_account_id(int(account_id))
         if p is None:
-            raise AdminError(404, "Unknown account %s" % account_id)
+            raise AdminError(404, f"Unknown account {account_id}")
         return p, p.state.snapshot()
+
+    def _news(self):
+        """Die News-Verwaltung; ohne sie (AdminService ohne news=) 404 statt AttributeError."""
+        if self.news is None:
+            raise AdminError(404, "News are not available")
+        return self.news
 
     def _token(self, account_id):
         return next((t for t, a in self.players.index.items() if a == account_id), "")
@@ -302,7 +309,7 @@ class AdminService:
         # alles, was je Account über alle Accounts liefe, einmal vorab
         # (Tracking, Clans); Spielstände ohne Kopie lesen
         out = []
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         cheats = self.players.tracker.latest_by_account(
             [tracking.CHEAT_FAILURE, tracking.CLIENT_HACK])
         guild_names = {m["AccountId"]: g.get("DisplayName", "")
@@ -380,7 +387,7 @@ class AdminService:
             "Guild": self._guild_name(a["AccountId"]),
             "GuildId": (self.guilds.guild_of(a["AccountId"]) or {}).get("Id"),
             "Wallet": a.get("Wallet") or {}, "Shield": due,
-            "Sanction": p.state.sanction(datetime.datetime.now(datetime.timezone.utc)),
+            "Sanction": p.state.sanction(datetime.datetime.now(datetime.UTC)),
             "Heroes": [{"Id": h["HeroSpecContainerId"],
                         "Name": HERO_NAMES.get(h["HeroSpecContainerId"], "?"),
                         "Level": h.get("Level", 1), "XP": h.get("XP", 0),
@@ -439,7 +446,7 @@ class AdminService:
     def GetGuildDetail(self, args):
         g = self.guilds.guilds.get(int(args["guildId"]))
         if g is None:
-            raise AdminError(404, "Unknown clan %s" % args["guildId"])
+            raise AdminError(404, f"Unknown clan {args['guildId']}")
         members = []
         for m, a in self.guilds._accounts(g):
             name, real = self._member_name(m["AccountId"])
@@ -465,9 +472,9 @@ class AdminService:
 
     # Käufe: Test-Shop (Blings, Pakete), Bling-Shop-Pakete und Spiel-Shop-Käufe
     # mit Blings; Spiel-Shop-Käufe mit Gold/Lebenskraft zählen nicht
-    PURCHASE_TAGS = {tracking.PREMIUM_CASH_PURCHASED: "Blings",
-                     tracking.SPECIAL_PACK_PURCHASED: "Pack",
-                     tracking.SHOP: "Shop"}
+    PURCHASE_TAGS: ClassVar[dict[int, str]] = {tracking.PREMIUM_CASH_PURCHASED: "Blings",
+                                               tracking.SPECIAL_PACK_PURCHASED: "Pack",
+                                               tracking.SHOP: "Shop"}
 
     def GetPurchases(self, args):
         """IAP (neueste zuerst), optional je Spieler; dazu Summen je Spieler."""
@@ -486,16 +493,16 @@ class AdminService:
                                         "BlingsBought": 0, "Packs": 0, "BlingsSpent": 0})
             if tag == tracking.SHOP:
                 sku = self.data.skus.get(e.get("SkuCode"), {})
-                item = "%s (%d Blings)" % (sku.get("InternalDescription") or
-                                           "SKU %s" % e.get("SkuCode"), spent)
+                sku_name = sku.get("InternalDescription") or f"SKU {e.get('SkuCode')}"
+                item = f"{sku_name} ({int(spent)} Blings)"
                 t["BlingsSpent"] += spent
             elif tag == tracking.PREMIUM_CASH_PURCHASED:
-                item = "%s Blings" % e.get("Amount", 0)
+                item = f"{e.get('Amount', 0)} Blings"
                 t["BlingsBought"] += e.get("Amount", 0)
             else:
-                item = packs.get(e.get("SpecialPackId"), "Pack %s" % e.get("SpecialPackId"))
+                item = packs.get(e.get("SpecialPackId"), f"Pack {e.get('SpecialPackId')}")
                 if e.get("Blings"):
-                    item += " (%d Blings)" % e["Blings"]
+                    item += f" ({int(e['Blings'])} Blings)"
                     t["BlingsSpent"] += e["Blings"]
                 t["Packs"] += 1
             rows.append({"Date": e["CreationDate"], "AccountId": aid, "Player": names[aid],
@@ -543,11 +550,11 @@ class AdminService:
         n = int(args.get("amount") or 1)
         if kind == "equipment":
             if tid not in p.state.data.templates:
-                raise AdminError(400, "Unknown template %d" % tid)
+                raise AdminError(400, f"Unknown template {tid}")
             items = [("equipment", tid, n)]
         elif kind == "material":
             if tid not in p.state.data.consumables:
-                raise AdminError(400, "Unknown consumable %d" % tid)
+                raise AdminError(400, f"Unknown consumable {tid}")
             items = [("material", tid, n)]
         else:
             raise AdminError(400, "kind must be equipment or material")
@@ -567,7 +574,7 @@ class AdminService:
         try:
             hero, xp, changed = p.state.admin_hero_level(hero_id, level)
         except KeyError:
-            raise AdminError(404, "Hero %d not owned" % hero_id)
+            raise AdminError(404, f"Hero {hero_id} not owned")
         except ValueError as e:
             raise AdminError(400, str(e))
         if xp:
@@ -583,7 +590,7 @@ class AdminService:
         """hours > 0: Schild für so viele Stunden (ersetzt einen bestehenden);
         0: Schild entfernen."""
         p, _ = self._account(args["accountId"])
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         hours = float(args.get("hours") or 0)
         events = p.state.expire_shield(now, remove=True)
         if hours > 0:
@@ -597,7 +604,7 @@ class AdminService:
         (aufheben). Wirkt ab der nächsten Anfrage des Clients."""
         p, _ = self._account(args["accountId"])
         status, reason = args["status"], args.get("reason") or ""
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         if status == "ban":
             sanction = {"Status": 2, "Reason": reason, "Since": now.strftime("%Y-%m-%dT%H:%M:%SZ")}
         elif status == "suspend":
@@ -652,7 +659,7 @@ class AdminService:
         try:
             self.players.auth.set_password(p.name, str(args["password"]))
         except auth.AuthError:
-            raise AdminError(400, "Password too short (at least %d characters)" % auth.MIN_PASSWORD)
+            raise AdminError(400, f"Password too short (at least {auth.MIN_PASSWORD} characters)")
         self.players.auth.logout(p.name)
         return {"Ok": True}
 
@@ -701,14 +708,14 @@ class AdminService:
         return {"Maintenance": on, "Sessions": kicked}
 
     def GetNews(self, args):
-        return {"News": self.news.all()}
+        return {"News": self._news().all()}
 
     def SaveNews(self, args):
-        return self.news.save(args["title"], args.get("text", ""), args.get("date"),
+        return self._news().save(args["title"], args.get("text", ""), args.get("date"),
                               int(args["id"]) if args.get("id") else None)
 
     def DeleteNews(self, args):
-        self.news.delete(int(args["id"]))
+        self._news().delete(int(args["id"]))
         return {}
 
     def GetBalance(self, args):
@@ -720,7 +727,7 @@ class AdminService:
         lassen die Spieler beim nächsten Launcher-Start settings.bin laden."""
         try:
             result = balance.update(args.get("values") or {},
-                                    datetime.datetime.now(datetime.timezone.utc)
+                                    datetime.datetime.now(datetime.UTC)
                                     .strftime("%Y-%m-%dT%H:%M:%SZ"))
         except ValueError as e:
             raise AdminError(400, str(e))
@@ -728,9 +735,10 @@ class AdminService:
         return result
 
     # Quellen in der Telemetrie: verdient (positiv) und ausgegeben
-    EARN_KINDS = ["achievements", "quests", "mine", "loot", "pillage", "leagues",
-                  "competitions", "other"]
-    SPEND_KINDS = ["bling shop", "game shop"]
+    EARN_KINDS: ClassVar[list[str]] = [
+        "achievements", "quests", "mine", "loot", "boss", "pillage", "leagues",
+        "competitions", "other"]
+    SPEND_KINDS: ClassVar[list[str]] = ["bling shop", "game shop"]
 
     def GetEconomyStats(self, args):
         """Bling-Telemetrie der letzten `days` Tage aus den Kontobüchern
@@ -739,7 +747,7 @@ class AdminService:
         Buchungen aus dem Webtool (Source admin:…, z. B. Kompensation)
         zählen nicht mit, sie verzerren das Bild."""
         days = max(1, min(90, int(args.get("days") or 7)))
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         since = (now - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
         totals = {"Earned": {}, "Spent": {}}
         per_day, players = {}, []
@@ -779,7 +787,7 @@ class AdminService:
     def GetServerStats(self, args):
         """Technik (server_stats) und Spieler online: LastSeenOnline jünger
         als PLAY_GAP (wird höchstens alle 5 Minuten fortgeschrieben)."""
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         since = (now - datetime.timedelta(seconds=account_state.AccountState.PLAY_GAP)
                  ).strftime("%Y-%m-%dT%H:%M:%SZ")
         online = sum(1 for account_id in self.players.index.values()
@@ -794,7 +802,7 @@ class AdminService:
         try:
             special_packs.pack(pack_id)
         except StopIteration:
-            raise AdminError(400, "Unknown pack %d" % pack_id)
+            raise AdminError(400, f"Unknown pack {pack_id}")
         granted = p.state.grant_special_pack(pack_id)
         for name, fields in p.state.take_pack_events():
             p.notifications.push(name, fields)
@@ -808,7 +816,7 @@ class AdminService:
         Body (JsonPost, ein Feld je Parameter)."""
         fn = getattr(self, method, None) if method[:1].isupper() else None
         if fn is None:
-            raise AdminError(404, "AdminService.%s not implemented" % method)
+            raise AdminError(404, f"AdminService.{method} not implemented")
         args = {k: v[0] for k, v in query.items()}
         account_state.SOURCE.value = "admin:" + method  # Kontobuch
         if isinstance(body, dict):
@@ -816,7 +824,7 @@ class AdminService:
         try:
             return _with_item_types(fn(args))
         except (KeyError, ValueError, TypeError) as e:
-            raise AdminError(400, "Invalid arguments for %s: %s" % (method, e))
+            raise AdminError(400, f"Invalid arguments for {method}: {e}")
 
 
 def path_and_query(raw_path):

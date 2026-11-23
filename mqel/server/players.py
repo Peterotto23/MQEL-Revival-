@@ -79,7 +79,7 @@ class Players:
         os.replace(tmp, self.index_path)
 
     def _path(self, account_id):
-        return os.path.join(self.dir, "%d.json" % account_id)
+        return os.path.join(self.dir, f"{account_id:d}.json")
 
     def for_token(self, token, ip=None):
         """Spieler zum Sitzungs-Token oder None (unbekannt/abgemeldet)."""

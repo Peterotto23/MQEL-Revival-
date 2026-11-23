@@ -14,6 +14,7 @@ Enum-Name (der Client-Enumleser nimmt beides).
 """
 
 import threading
+from collections.abc import Callable
 
 import castles
 
@@ -91,7 +92,7 @@ class NotificationQueue:
         self.lock = threading.Lock()
         self.pending = []   # noch nicht bestätigt (Index > Client-n)
         self.last_index = 0
-        self.on_push = None  # (type_name, fields) je neuer Meldung (Tracking)
+        self.on_push: Callable[[str, dict], None] | None = None  # je neuer Meldung (Tracking)
 
     def ack(self, client_index):
         """Client hat alles bis `client_index` verarbeitet (Header `n`).
@@ -102,8 +103,7 @@ class NotificationQueue:
         der Account kommt dann frisch per GetAccountInformation.
         """
         with self.lock:
-            if client_index > self.last_index:
-                self.last_index = client_index
+            self.last_index = max(self.last_index, client_index)
             self.pending = [x for x in self.pending if x["Index"] > client_index]
 
     def reset(self, client_index):

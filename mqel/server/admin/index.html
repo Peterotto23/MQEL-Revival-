@@ -682,7 +682,8 @@ const BALANCE_KINDS = {
   data: ["game data", "Players download settings.bin (~4 MB) at their next launcher start"],
   ui: ["UI", "Players download the UI patch (small) at their next launcher start"],
 };
-const BALANCE_SECTIONS = {Mine: "Bling mine", Loot: "Rare bling loot (creatures)", Leagues: "Leagues", Competitions: "Competitions",
+const BALANCE_SECTIONS = {Mine: "Bling mine", Loot: "Rare bling loot (creatures)",
+                          Boss: "Boss raids (repeatable, paid on every win)", Leagues: "Leagues", Competitions: "Competitions",
                           Shop: "Bling shop (pack prices)", Objectives: "Quests (one-time, shown by the client)",
                           Achievements: "Achievements (one-time, shown in the popup)"};
 const BALANCE_TOTALS = ["Objectives", "Achievements"];
@@ -775,7 +776,7 @@ async function showEcoStats(days = 7) {
       {label: "Earned", num: true, get: r => fmt(sum(r.Earned))},
       {label: "Per hour", num: true, get: r => perHour(sum(r.Earned), r.Hours)},
       {label: "Biggest source", get: r => Object.entries(r.Earned).sort((a, b) => b[1] - a[1])[0]?.[0] || "–"},
-      {label: "Loot cap left", num: true, get: r => `${fmt(r.LootLeft)} / ${fmt(d.LootCap)}`},
+      {label: "Loot cap left", num: true, get: r => r.LootLeft === null ? "unlimited" : `${fmt(r.LootLeft)} / ${fmt(d.LootCap)}`},
       {label: "Spent", num: true, get: r => fmt(sum(r.Spent))},
       {label: "Balance", num: true, get: r => fmt(r.Balance)}],
       d.Players.sort((a, b) => sum(b.Earned) - sum(a.Earned)))),

@@ -38,9 +38,43 @@ import threading
 import time
 import traceback
 import urllib.parse
-from http.server import BaseHTTPRequestHandler, SimpleHTTPRequestHandler, ThreadingHTTPServer
+from http.server import (
+    BaseHTTPRequestHandler,
+    SimpleHTTPRequestHandler,
+    ThreadingHTTPServer,
+)
+from typing import Any, cast
 
 import account_state
+import admin
+import anticheat
+import attack
+import auth
+import balance
+import bling_shop
+import castle_sale
+import castle_stats
+import castles
+import chat_log
+import competitions
+import free_trials
+import geoip
+import guilds
+import leagues
+import limits
+import loot
+import news
+import notifications
+import patcher
+import players
+import profiles
+import replays
+import server_stats
+import special_packs
+import steam_auth
+import tracking
+import trophies
+import website
 from account_state import CURRENCY, PROFILES, ROOT
 
 ADMIN_PAGE = os.path.join(ROOT, "server", "admin", "index.html")
@@ -65,9 +99,9 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
         # Let's-Encrypt-Prüfung (certbot --webroot -w website) bleibt auf HTTP
         if (self.https and not isinstance(self.request, ssl.SSLSocket) and not self.path.startswith("/.well-known/acme-challenge/")):
             host = self.headers.get("Host", "").split(":")[0]
-            port = "" if self.https == 443 else ":%d" % self.https
+            port = "" if self.https == 443 else f":{self.https}"
             self.send_response(301)
-            self.send_header("Location", "https://%s%s%s" % (host, port, self.path))
+            self.send_header("Location", f"https://{host}{port}{self.path}")
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
@@ -75,35 +109,7 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
 
     def list_directory(self, path):
         self.send_error(404)
-import admin
-import chat_log
-import anticheat
-import attack
-import auth
-import balance
-import news
-import notifications
-import patcher
-import castles
-import castle_sale
-import castle_stats
-import competitions
-import bling_shop
-import special_packs
-import steam_auth
-import free_trials
-import guilds
-import limits
-import leagues
-import players
-import trophies
-import geoip
-import loot
-import profiles
-import replays
-import server_stats
-import tracking
-import website
+
 
 # Parallele Requests (Keep-Alive × N Connections) dürfen Log-Zeilen
 # nicht zerreißen: ein Lock für alle Log-Appends (HTTP + Honeypot).
@@ -116,7 +122,7 @@ def log_line(path, obj):
             limits.rotate_log(path)
             with open(path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(obj, ensure_ascii=False) + "\n")
-    except Exception as e:
+    except (OSError, TypeError, ValueError) as e:
         print(f"[warn] log write failed: {e}", flush=True)
 
 AMBIENT_HEADERS = ("t", "i", "h", "rnd", "n", "g", "v")
@@ -181,7 +187,7 @@ def load_responses(path):
                 merged.update(user)
             else:
                 print(f"[warn] {path}: kein JSON-Objekt, ignoriere", flush=True)
-        except Exception as e:  # Datei darf den Server nie killen
+        except (OSError, ValueError) as e:  # Datei darf den Server nie killen
             print(f"[warn] {path} nicht ladbar: {e}", flush=True)
     return merged
 
@@ -238,7 +244,7 @@ def _display_name_blocked():
     path = os.path.join(loot.SETTINGS, "GeneralSettings", "DisplayNameSettings.json")
     with open(path, encoding="utf-8-sig") as f:
         pattern = json.load(f)["AccountDisplayNameNoMatchRegex"]
-    return re.compile(pattern.replace("(?i)", ""), re.I)
+    return re.compile(pattern.replace("(?i)", ""), re.IGNORECASE)
 
 
 DISPLAY_NAME_BLOCKED = _display_name_blocked()
@@ -250,7 +256,8 @@ DISPLAY_NAME_BLOCKED = _display_name_blocked()
 SECRET_QUERY = {"ticket", "steam_ticket", "steamticket"}
 
 
-SECRET_QUERY_RE = re.compile(r"\b(%s)=[^&\s\"]*" % "|".join(SECRET_QUERY), re.I)
+_SECRET_ALT = "|".join(SECRET_QUERY)
+SECRET_QUERY_RE = re.compile(rf"\b({_SECRET_ALT})=[^&\s\"]*", re.IGNORECASE)
 
 
 def redact_query(query_string):
@@ -281,15 +288,21 @@ class GameHandler(BaseHTTPRequestHandler):
                 raise
     protocol_version = "HTTP/1.1"  # wie IIS-Original (Keep-Alive)
 
-    def log_message(self, fmt, *args):  # STDOUT statt STDERR, ruhiger
-        sys.stdout.write("[http] " + SECRET_QUERY_RE.sub(r"\1=(redacted)", fmt % args) + "\n")
+    @property
+    def srv(self) -> "GameHTTPServer":
+        """self.server, aber als GameHTTPServer typisiert (BaseServer kennt
+        players/guilds/... nicht)."""
+        return cast("GameHTTPServer", self.server)
+
+    def log_message(self, format, *args):  # STDOUT statt STDERR, ruhiger
+        sys.stdout.write("[http] " + SECRET_QUERY_RE.sub(r"\1=(redacted)", format % args) + "\n")
         sys.stdout.flush()
 
     def _base_url(self):
         """Schema und Host dieser Anfrage, für URLs, die der Client wieder
         hierher schickt (HTTPS-Port: https, sonst Klartext auf dem Port)."""
         scheme = "https" if isinstance(self.connection, ssl.SSLSocket) else "http"
-        return "%s://%s" % (scheme, self.headers.get("Host", ""))
+        return f"{scheme}://{self.headers.get('Host', '')}"
 
     def _read_body(self):
         """Body (EndAttack trägt den Replay als Anhang, replays.py) oder None,
@@ -321,16 +334,13 @@ class GameHandler(BaseHTTPRequestHandler):
         raw_body = self._read_body()
         if raw_body is None:
             return
-        try:
-            body_text = raw_body.decode("utf-8", errors="replace")
-        except Exception:
-            body_text = repr(raw_body)
+        body_text = raw_body.decode("utf-8", errors="replace")
         try:
             # EndAttack hängt hinter das JSON den binären Replay an
             body_json, end = (json.JSONDecoder().raw_decode(body_text)
                               if body_text.strip() else (None, 0))
             replay = raw_body[len(body_text[:end].encode("utf-8")):]
-        except Exception:
+        except ValueError:  # JSONDecodeError
             body_json, replay = None, b""
 
         ambient = {k: self.headers.get(k) for k in AMBIENT_HEADERS
@@ -343,7 +353,7 @@ class GameHandler(BaseHTTPRequestHandler):
         else:
             logged_json = body_json
         entry = {
-            "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "ts": datetime.datetime.now(datetime.UTC).isoformat(),
             "http_method": self.command,
             "raw_path": logged_path,
             "service": service,
@@ -370,7 +380,7 @@ class GameHandler(BaseHTTPRequestHandler):
         # 2. JSONL-File (voll): die eigentliche Spezifikationsquelle.
         # (geschrieben jeweils NACH der Antwort, inkl. Response-Summary)
         def _log():
-            log_line(self.server.log_path, entry)
+            log_line(self.srv.log_path, entry)
         self._entry = entry  # für _safe_handle, falls die Spiellogik wirft
 
         # 3. Antwort bestimmen.
@@ -397,7 +407,7 @@ class GameHandler(BaseHTTPRequestHandler):
         # Spieler = Sitzungs-Token im Header t (vom Launcher-Login, auth.py);
         # unbekannt oder abgemeldet -> InvalidConnectionTokenException wie
         # AuthenticationInterceptor (Code aus der Registrierung des Clients)
-        player = self.server.players.for_token(self.headers.get("t"), self.client_address[0])
+        player = self.srv.players.for_token(self.headers.get("t"), self.client_address[0])
         if player is None:
             self._send_service_exception(
                 "Contracts.Common.Exceptions.InvalidConnectionTokenException, Contracts.Common",
@@ -415,10 +425,10 @@ class GameHandler(BaseHTTPRequestHandler):
         except ValueError:
             pass
         notify = player.notifications
-        overrides = load_responses(self.server.responses_path)
+        overrides = load_responses(self.srv.responses_path)
         state = player.state
         account_state.SOURCE.value = f"{key} ({player.name})"
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         # Bann/Sperre (Admin-Webtool): Anfragen abweisen wie
         # ConnectionManager.EnsureTokenIsValid. Codes wie im finalen Client
         # (Fehler-Dialoge nach Code registriert, 0xdbfa20): 0x80020108 Bann,
@@ -435,10 +445,10 @@ class GameHandler(BaseHTTPRequestHandler):
                                              0x80020108, "Your account is banned", entry, 426)
             else:
                 until = datetime.datetime.strptime(sanction["Until"], "%Y-%m-%dT%H:%M:%SZ")
-                seconds = int((until.replace(tzinfo=datetime.timezone.utc) - now).total_seconds())
+                seconds = int((until.replace(tzinfo=datetime.UTC) - now).total_seconds())
                 self._send_service_exception(
                     "Exceptions.AccountSuspendedException", 0x80020109,
-                    "Your account is suspended until %s" % sanction["Until"], entry, 427,
+                    f"Your account is suspended until {sanction['Until']}", entry, 427,
                     ExpirationTotalSeconds=seconds)
             _log()
             return
@@ -476,12 +486,12 @@ class GameHandler(BaseHTTPRequestHandler):
             # Kronen, angreifbar); gespeichert ist der vom Tag der Freundschaft
             payload["Friends"] = [
                 self._summary(p) if p else f
-                for f, p in ((f, self.server.players.by_account_id(f["Id"]))
+                for f, p in ((f, self.srv.players.by_account_id(f["Id"]))
                              for f in payload.get("Friends") or [])]
             # Clan-Zugehörigkeit: Account.Guild (zweiter Teil des
             # Account-Lesers im Client, 0x542170); fehlt sie, gilt man als
             # clanlos, obwohl der Clan einen als Mitglied führt
-            guild = self.server.guilds.account_guild(payload["AccountId"])
+            guild = self.srv.guilds.account_guild(payload["AccountId"])
             # Bling-Shop (game://shop/showprimaryshop): der Client öffnet die
             # Shop-Adressen im eingebauten Browser-Overlay
             # (UiSettings.PrimaryShopWebBrowserSettings); mit leerem
@@ -508,6 +518,7 @@ class GameHandler(BaseHTTPRequestHandler):
             payload.pop(state.SANCTION, None)
             payload.pop(state.ACHIEVEMENT_BLINGS, None)
             payload.pop(loot.BLING_LOOT, None)
+            payload.pop(loot.BOSS_LOG, None)
             payload.pop(state.PLAY_TIME, None)
             payload.pop(state.SALE, None)
             payload.pop(state.MINE_CLOCK, None)
@@ -624,22 +635,22 @@ class GameHandler(BaseHTTPRequestHandler):
                                           state.castle_rating(q.get("castleId", 0)),
                                           state.castle_stars(q.get("castleId", 0)),
                                           self._last_seen(q.get("castleId", 0)),
-                                          self.server.castle_stats.info(q.get("castleId", 0)),
+                                          self.srv.castle_stats.info(q.get("castleId", 0)),
                                           delegated)
             if payload is None:
                 print(f"    [warn] Burg {q.get('castleId')} unbekannt", flush=True)
                 payload = {}
         elif key == "AccountInformationService.hqs/GetPublicProfileById":
             aid = query.get("accountId", ["0"])[0]
-            other = (self.server.players.by_account_id(int(aid))
+            other = (self.srv.players.by_account_id(int(aid))
                      if aid.isdigit() else None)
             fake = profiles.fake_account(int(aid)) if aid.isdigit() else None
             if other is not None:
                 payload = profiles.public_profile(
-                    other.state.snapshot(), self.server.guilds.header(other.account_id))
+                    other.state.snapshot(), self.srv.guilds.header(other.account_id))
             elif fake is not None:
                 payload = profiles.public_profile(
-                    fake, self.server.guilds.header(fake["AccountId"]))
+                    fake, self.srv.guilds.header(fake["AccountId"]))
             else:
                 print(f"    [warn] Profil {aid} unbekannt", flush=True)
                 payload = {}
@@ -651,11 +662,11 @@ class GameHandler(BaseHTTPRequestHandler):
                 n = 20
             payload = profiles.search(
                 str(body.get("q") or ""), n,
-                [p.state.snapshot() for p in self.server.players.all()],
-                self.server.guilds.header)
+                [p.state.snapshot() for p in self.srv.players.all()],
+                self.srv.guilds.header)
         elif key == "FriendshipService.hqs/SendFriendshipInvitation":
             fid = (body_json or {}).get("friendAccountId", 0) if isinstance(body_json, dict) else 0
-            other = self.server.players.by_account_id(fid)
+            other = self.srv.players.by_account_id(fid)
             fake = profiles.fake_account(fid)
             player.tracker.track(player.account_id, tracking.FRIENDSHIP_INVITATION_SENT,
                                  {"FriendAccountId": fid})
@@ -679,7 +690,7 @@ class GameHandler(BaseHTTPRequestHandler):
         elif method in ("AcceptFriendshipInvitation", "DeclineFriendshipInvitation",
                         "CancelFriendshipInvitation") and service == "FriendshipService.hqs":
             fid = (body_json or {}).get("friendAccountId", 0) if isinstance(body_json, dict) else 0
-            other = self.server.players.by_account_id(fid)
+            other = self.srv.players.by_account_id(fid)
             self._answer_invitation(player, other, fid, method)
             if method != "AcceptFriendshipInvitation":  # Annehmen: Tracking 603 beim FriendshipAdded (wie Original)
                 player.tracker.track(player.account_id, tracking.FRIENDSHIP_ANSWERED[method],
@@ -694,7 +705,7 @@ class GameHandler(BaseHTTPRequestHandler):
             state.remove_friend(int(fid))
             player.tracker.track(player.account_id, tracking.FRIENDSHIP_REMOVED,
                                  {"FriendAccountId": int(fid)})
-            other = self.server.players.by_account_id(int(fid))
+            other = self.srv.players.by_account_id(int(fid))
             if other is not None:
                 other.state.remove_friend(player.account_id)
                 other.notifications.push("FriendshipRemoved",
@@ -705,27 +716,27 @@ class GameHandler(BaseHTTPRequestHandler):
             rid = (body_json or {}).get("requestAccountId", 0) if isinstance(body_json, dict) else 0
             if profiles.fake_account(rid) is None:
                 print(f"    [warn] Clan-Einladung an {rid}: nur Dummy-Spieler", flush=True)
-            elif self.server.guilds.add_member(state.account["AccountId"], rid,
-                                               datetime.datetime.now(datetime.timezone.utc)
+            elif self.srv.guilds.add_member(state.account["AccountId"], rid,
+                                               datetime.datetime.now(datetime.UTC)
                                                .strftime("%Y-%m-%dT%H:%M:%SZ")):
-                guild = self.server.guilds.account_guild(rid)
+                guild = self.srv.guilds.account_guild(rid)
                 notify.push("GuildMemberJoined", {"Guild": guild, "JoinerId": rid})
             payload = {}
         elif key == "GuildService.hqs/SendJoinRequest":
             b = body_json if isinstance(body_json, dict) else {}
             # Wie CreateGuild: ohne Clan-Objekt beendet sich der Client
             gid, me = int(b.get("guildId", 0) or 0), state.account["AccountId"]
-            if self.server.guilds.join(gid, me,
-                                       datetime.datetime.now(datetime.timezone.utc)
+            if self.srv.guilds.join(gid, me,
+                                       datetime.datetime.now(datetime.UTC)
                                        .strftime("%Y-%m-%dT%H:%M:%SZ")):
                 # Der Client liest Guild und JoinerId (Leser 0x94a580)
-                notify.push("GuildMemberJoined", {"Guild": self.server.guilds.guild_info(gid),
+                notify.push("GuildMemberJoined", {"Guild": self.srv.guilds.guild_info(gid),
                                                   "JoinerId": me})
-            payload = self.server.guilds.guild_info(gid) or {}
+            payload = self.srv.guilds.guild_info(gid) or {}
         elif key == "GuildService.hqs/RemoveMember":
             b = body_json if isinstance(body_json, dict) else {}
             me, member = state.account["AccountId"], int(b.get("memberAccountId", 0) or 0)
-            left = self.server.guilds.remove_member(me, member)
+            left = self.srv.guilds.remove_member(me, member)
             if left and member == me:
                 # Felder laut Client-Leser (0x7d1e70)
                 notify.push("GuildLeft", {"GuildId": left[0], "GuildStillExists": left[1]})
@@ -733,11 +744,11 @@ class GameHandler(BaseHTTPRequestHandler):
                 # Rauswerfen: GuildMemberLeft hat außer Index/NotificationType
                 # nur Objektfelder (ToString 0xa69cf0) -- der Clan ohne das
                 # Mitglied, wie Guild bei GuildMemberJoined
-                notify.push("GuildMemberLeft", {"Guild": self.server.guilds.guild_info(left[0])})
+                notify.push("GuildMemberLeft", {"Guild": self.srv.guilds.guild_info(left[0])})
             payload = {}
         elif key == "GuildService.hqs/UpdateMemberTitle":
             b = body_json if isinstance(body_json, dict) else {}
-            res = self.server.guilds.set_title(state.account["AccountId"],
+            res = self.srv.guilds.set_title(state.account["AccountId"],
                                                int(b.get("memberAccountId", 0) or 0),
                                                int(b.get("newTitle", 0) or 0))
             if res:
@@ -753,7 +764,7 @@ class GameHandler(BaseHTTPRequestHandler):
                 self._validation_castle(body.get("castleAccountId"), state.snapshot()))
             if payload and payload["UbisoftCompetitionId"]:
                 # eigene Bestzeit im Wettbewerb (0: noch keine)
-                payload["UbisoftCompetitionBestTime"] = dict(self.server.competitions.ranking(
+                payload["UbisoftCompetitionBestTime"] = dict(self.srv.competitions.ranking(
                     payload["UbisoftCompetitionId"])).get(state.account["AccountId"], 0)
             if payload and payload["IsTargetedAttack"]:
                 for name, fields in state.use_targeted_attack(now):
@@ -776,11 +787,12 @@ class GameHandler(BaseHTTPRequestHandler):
             rating = (body_json or {}).get("castleRating", 0) if isinstance(body_json, dict) else 0
             if castle_id is not None and rating:
                 state.rate_castle(castle_id, rating)
-            message = ((body_json or {}).get("message") or "").strip() if isinstance(body_json, dict) else ""
+            bj = body_json if isinstance(body_json, dict) else {}
+            message = (bj.get("message") or "").strip()
             if castle_id is not None and message:
                 snap = state.snapshot()
-                self.server.castle_stats.comment(
-                    castle_id, body_json.get("attackId", ""), snap["AccountId"],
+                self.srv.castle_stats.comment(
+                    castle_id, bj.get("attackId", ""), snap["AccountId"],
                     snap.get("AvatarId", 10), message)
             field = CURRENCY[payload["CurrencyType"]]
             delta = state.earn(field, payload["Amount"])
@@ -810,22 +822,23 @@ class GameHandler(BaseHTTPRequestHandler):
                                      {"CheatContext": anticheat.CHEAT_CONTEXT_END_ATTACK,
                                       "Message": msg})
                 print(f"    [anticheat] {player.name}: {msg}", flush=True)
-            payload, gains = attack.end_attack(state.snapshot(), params, player.attack)
+            payload, gains = attack.end_attack(state.snapshot(), params, player.attack,
+                                               suspicious=bool(cheats))
             # Kommentar des vorigen Angreifers (der eigene kommt erst mit RateCastle)
-            payload["LastComment"] = self.server.castle_stats.last_comment(
+            payload["LastComment"] = self.srv.castle_stats.last_comment(
                 gains["castle_id"], castles.T, state.account.get("ProfanityFiltering", False))
             changed = state.credit_attack(gains)
             # kein Wettbewerbs-Rekord aus einem verdächtigen Kampf
             if (gains["competition"] and gains["completion_type"] == 0 and not cheats
                     and not gains["practice"] and gains["duration_ms"]):
-                result = self.server.competitions.record(
+                result = self.srv.competitions.record(
                     gains["competition"], state.account["AccountId"], gains["duration_ms"])
                 payload["IsUbisoftCompetitionValid"] = result["valid"]
                 payload["IsNewUbisoftCompetitionLeader"] = result["new_leader"]
             if (not gains["practice"] and not gains["validation"]
                     and gains["castle_type"] == castles.CASTLE_TYPE_USER):
                 won = gains["completion_type"] == 0
-                self.server.castle_stats.record(gains["castle_id"], not won,
+                self.srv.castle_stats.record(gains["castle_id"], not won,
                                                 gains["duration_ms"])
             if gains["trophy_record"]:
                 state.set_trophy_record(gains["castle_id"], gains["trophy_record"])
@@ -839,9 +852,9 @@ class GameHandler(BaseHTTPRequestHandler):
             if gains["revenge"]:
                 state.use_revenge(gains["revenge"])
             defender = (gains["defense"] and not gains["validation"]
-                        and self.server.players.by_account_id(gains["castle_id"]))
+                        and self.srv.players.by_account_id(gains["castle_id"]))
             if defender:
-                gains["defense"]["entry"]["HasReplay"] = self.server.replays.store(
+                gains["defense"]["entry"]["HasReplay"] = self.srv.replays.store(
                     attack_id, replay, attack_info)
                 self._record_defense(defender, gains["defense"], state.snapshot(),
                                      gains["trophies"])
@@ -906,8 +919,8 @@ class GameHandler(BaseHTTPRequestHandler):
         elif key == "SeasonalCompetitionService.hqs/GetSeasonalCompetition":
             self._check_season(state, notify)
             payload = leagues.page(
-                state.snapshot(), [p.state.snapshot() for p in self.server.players.all()],
-                query, self.server.guilds.header)
+                state.snapshot(), [p.state.snapshot() for p in self.srv.players.all()],
+                query, self.srv.guilds.header)
             if payload["PreviousLeagueInfo"]:
                 state.mark_season_viewed()
         elif key == "SeasonalCompetitionService.hqs/CheckSeasonalCompetitionRewards":
@@ -918,9 +931,9 @@ class GameHandler(BaseHTTPRequestHandler):
                 cid = int(query.get("ubisoftCompetitionId", ["0"])[0])
             except ValueError:
                 cid = 0
-            payload = self.server.competitions.info(
-                cid, state.snapshot(), [p.state.snapshot() for p in self.server.players.all()],
-                self.server.guilds.header)
+            payload = self.srv.competitions.info(
+                cid, state.snapshot(), [p.state.snapshot() for p in self.srv.players.all()],
+                self.srv.guilds.header)
             if payload is None:
                 print(f"    [warn] Wettbewerb {cid} unbekannt", flush=True)
                 payload = {}
@@ -932,7 +945,7 @@ class GameHandler(BaseHTTPRequestHandler):
         elif service == "GuildService.hqs" and method in (
                 "CreateGuild", "UpdateGuild", "GetGuildById",
                 "GetLeaderboardPage", "SearchGuilds", "Search", "GetBattleLog"):
-            g, account = self.server.guilds, state.snapshot()
+            g, account = self.srv.guilds, state.snapshot()
             body = body_json if isinstance(body_json, dict) else {}
             own = g.guild_of(account["AccountId"])
             error = method in ("CreateGuild", "UpdateGuild") and "displayName" in body and g.name_error(
@@ -943,7 +956,7 @@ class GameHandler(BaseHTTPRequestHandler):
                 return
             if method == "CreateGuild":
                 payload = g.create(account, body, datetime.datetime.now(
-                    datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+                    datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
             elif method == "UpdateGuild":
                 payload = g.update(account, body)
             elif method in ("GetGuildById", "GetBattleLog"):
@@ -969,12 +982,12 @@ class GameHandler(BaseHTTPRequestHandler):
                 try:
                     with open(ref, "r", encoding="utf-8") as f:
                         payload = json.load(f)
-                except Exception as e:
+                except (OSError, ValueError) as e:
                     print(f"    [warn] Stub-Datei {ref} nicht ladbar: {e}", flush=True)
                     payload = {}
         elif key == "ReplayService.hqs/StartReplayAttack":
             aid = (body_json or {}).get("attackId", "") if isinstance(body_json, dict) else ""
-            info = self.server.replays.load_info(aid) or {}
+            info = self.srv.replays.load_info(aid) or {}
             if not info:
                 print(f"    [warn] keine AttackInfo zum Replay {aid!r}", flush=True)
             # ohne Result-Hülle: der Client liest die Antwort direkt als
@@ -991,7 +1004,7 @@ class GameHandler(BaseHTTPRequestHandler):
             if service == "ReplayService.hqs":
                 aid = (query.get("attackId") or [(body_json or {}).get("attackId", "")
                        if isinstance(body_json, dict) else ""])[0]
-                data = self.server.replays.load(aid) or b""
+                data = self.srv.replays.load(aid) or b""
                 if not data:
                     print(f"    [warn] kein Replay zu {aid!r}", flush=True)
             self._send_bytes(data)
@@ -1013,23 +1026,24 @@ class GameHandler(BaseHTTPRequestHandler):
         if key in UNWRAPPED:
             # liest das DTO direkt, ohne WrappedResponse: Notifications
             # bleiben für den nächsten Request liegen
-            body = _client_json(payload)
-            notes = globals_ = None
-        elif self.headers.get("i") == "0":
-            # Erste Anfrage eines frisch gestarteten Clients (Zähler i beginnt
-            # bei 0). Im Original gehören Notifications zur Verbindung, eine
-            # neue beginnt leer (NotificationManager.AddNotifications nur an
-            # verbundene Sitzungen); Offenes steckt im gleich geladenen
-            # Account. Beim Login kommt diese Anfrage (TrackingCommand)
-            # gleichzeitig mit GetAccountInformation und hätte sonst die alten
-            # Meldungen vor dessen reset ausgeliefert (doppelt angewendet)
-            notify.reset(int(self.headers.get("n", "0") or 0))
+            out = _client_json(payload)
             notes = []
         else:
-            notes = player.notifications.outgoing()
-        if notes is not None:
+            if self.headers.get("i") == "0":
+                # Erste Anfrage eines frisch gestarteten Clients (Zähler i
+                # beginnt bei 0). Im Original gehören Notifications zur
+                # Verbindung, eine neue beginnt leer
+                # (NotificationManager.AddNotifications nur an verbundene
+                # Sitzungen); Offenes steckt im gleich geladenen Account. Beim
+                # Login kommt diese Anfrage (TrackingCommand) gleichzeitig mit
+                # GetAccountInformation und hätte sonst die alten Meldungen vor
+                # dessen reset ausgeliefert (doppelt angewendet)
+                notify.reset(int(self.headers.get("n", "0") or 0))
+                notes = []
+            else:
+                notes = player.notifications.outgoing()
             globals_ = competitions.refreshed(player)
-            body = _client_json(wrap_response(payload, notes, globals_))
+            out = _client_json(wrap_response(payload, notes, globals_))
         if notes:
             print(f"    [notify] {', '.join(n['$type'].split(',')[0].rsplit('.', 1)[-1] + '#' + str(n['Index']) for n in notes)}",
                   flush=True)
@@ -1037,17 +1051,17 @@ class GameHandler(BaseHTTPRequestHandler):
         # Exakt wie ASP.NET-Original (der Client kennt nur dieses Literal;
         # vgl. Binary-Strings). Bloßes "application/json" riskiert CT-Mismatch.
         self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Length", str(len(out)))
         # 'sl' sendet auch das Original (Timing-Verschleierung, s. 30-protokoll)
         self.send_header("sl", str(random.randint(0, 50)))
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
-        self.wfile.write(body)
-        print(f"    <- 200 application/json ({key}): {body[:200].decode('utf-8', 'replace')}", flush=True)
+        self.wfile.write(out)
+        print(f"    <- 200 application/json ({key}): {out[:200].decode('utf-8', 'replace')}", flush=True)
         entry["response"] = {
             "status": 200,
             "content_type": "application/json; charset=utf-8",
-            "preview": body[:150].decode("utf-8", "replace"),
+            "preview": out[:150].decode("utf-8", "replace"),
         }
         _log()
 
@@ -1055,7 +1069,7 @@ class GameHandler(BaseHTTPRequestHandler):
         """Saison-/Tageswertung abrechnen (leagues.settle), mit Meldungen an
         `notify` (None: steht schon im gleich gelieferten Account)."""
         result = leagues.settle(state.snapshot(),
-                                [p.state.snapshot() for p in self.server.players.all()])
+                                [p.state.snapshot() for p in self.srv.players.all()])
         if result is None:
             return
         wallet, decorations, news = state.settle_league(result)
@@ -1078,7 +1092,7 @@ class GameHandler(BaseHTTPRequestHandler):
 
     def _track_season(self, state, result, wallet):
         """Liga-Auf-/Abstieg und Weltrangliste ins Tracking."""
-        p = self.server.players.by_account_id(state.account["AccountId"])
+        p = self.srv.players.by_account_id(state.account["AccountId"])
         prev = result["Previous"]
         if result["League"] and prev:
             order = [(l["Id"], s["Id"]) for l in trophies.league_settings()["Leagues"]
@@ -1098,7 +1112,7 @@ class GameHandler(BaseHTTPRequestHandler):
 
     def _check_competitions(self, state, notify):
         """Beendete Wettbewerbe abrechnen (Edelsteine, News)."""
-        result = self.server.competitions.settle(state.snapshot(), self.server.guilds.header)
+        result = self.srv.competitions.settle(state.snapshot(), self.srv.guilds.header)
         if not result["Ids"]:
             return
         wallet, news = state.settle_competitions(result)
@@ -1112,7 +1126,7 @@ class GameHandler(BaseHTTPRequestHandler):
         """FriendshipInvitation mit dem Spieler summary (AccountSummary);
         owner: aus Sicht des Einladenden."""
         return {"$type": castles.T("FriendshipInvitation"),
-                "CreationDate": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "CreationDate": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "FriendAccountId": summary["Id"], "FriendAvatarId": summary["AvatarId"],
                 "FriendDisplayName": summary["DisplayName"],
                 "HasAccepted": False, "HasDeclined": False,
@@ -1121,7 +1135,7 @@ class GameHandler(BaseHTTPRequestHandler):
 
     def _summary(self, p):
         a = p.state.snapshot()
-        return profiles.account_summary(a, self.server.guilds.header(a["AccountId"]))
+        return profiles.account_summary(a, self.srv.guilds.header(a["AccountId"]))
 
     def _invite(self, sender, other):
         """Einladung an einen echten Spieler: bei beiden offen eintragen,
@@ -1142,7 +1156,7 @@ class GameHandler(BaseHTTPRequestHandler):
 
     def _real_friends(self, player):
         """Freunde von player, die echte Spieler sind."""
-        friends = (self.server.players.by_account_id(f["Id"])
+        friends = (self.srv.players.by_account_id(f["Id"])
                    for f in player.state.snapshot().get("Friends") or [])
         return [f for f in friends if f is not None]
 
@@ -1223,7 +1237,7 @@ class GameHandler(BaseHTTPRequestHandler):
         for group in payload["CastlesByLevel"] + [{"Castles": boss}]:
             for c in group["Castles"]:
                 cid = c["DefenderAccountSummary"]["Id"]
-                c["LastComment"] = self.server.castle_stats.last_comment(
+                c["LastComment"] = self.srv.castle_stats.last_comment(
                     cid, castles.T, snap.get("ProfanityFiltering", False))
                 if c.get("CastleType") == castles.CASTLE_TYPE_USER:
                     # wie AttackSelectionManager: Sperre und beste Sterne darin
@@ -1237,7 +1251,7 @@ class GameHandler(BaseHTTPRequestHandler):
     def _may_validate(self, viewer):
         """Prüfung für castles.validation_castle(s): darf viewer die Burg
         des Besitzers validieren? Clan-Ticket nur im selben Clan."""
-        guild = self.server.guilds.guild_of(viewer["AccountId"])
+        guild = self.srv.guilds.guild_of(viewer["AccountId"])
 
         def may(owner_id, guild_only):
             return not guild_only or bool(guild and any(
@@ -1247,7 +1261,7 @@ class GameHandler(BaseHTTPRequestHandler):
     def _validation_castle(self, castle_id, viewer):
         """Burg castle_id im Stand ihres Validierungs-Tickets, wenn viewer
         sie validieren darf, sonst None."""
-        owner = isinstance(castle_id, int) and self.server.players.by_account_id(castle_id)
+        owner = isinstance(castle_id, int) and self.srv.players.by_account_id(castle_id)
         return owner and castles.validation_castle(
             owner.state.snapshot(), viewer["AccountId"], self._may_validate(viewer))
 
@@ -1256,10 +1270,10 @@ class GameHandler(BaseHTTPRequestHandler):
         CastleValidationRequested (Feld laut Strings bei
         CastleValidationRequestedNotification.cpp)."""
         ticket = player.state.delegation()
-        guild = ticket and ticket["Guild"] and self.server.guilds.guild_of(player.account_id)
+        guild = ticket and ticket["Guild"] and self.srv.guilds.guild_of(player.account_id)
         for m in (guild or {}).get("Members", []):
             other = (m["AccountId"] != player.account_id
-                     and self.server.players.by_account_id(m["AccountId"]))
+                     and self.srv.players.by_account_id(m["AccountId"]))
             if other:
                 other.notifications.push("CastleValidationRequested",
                                          {"RequestorAccountId": player.account_id})
@@ -1269,7 +1283,7 @@ class GameHandler(BaseHTTPRequestHandler):
         Besitzers validiert (Meldungen an ihn), der Validierer bekommt die
         CompletionReward (nur beim bezahlten Ticket). False, wenn das Ticket
         nicht mehr offen war."""
-        owner = self.server.players.by_account_id(gains["castle_id"])
+        owner = self.srv.players.by_account_id(gains["castle_id"])
         events = owner.state.complete_delegation(gains["duration_ms"] / 1000) if owner else []
         if not events:
             return False
@@ -1287,7 +1301,7 @@ class GameHandler(BaseHTTPRequestHandler):
         NotificationManager.OnTrophyScoreChanged/OnLeagueUpdated im Original
         (FriendAccountId = account)."""
         for f in account.get("Friends") or []:
-            friend = self.server.players.by_account_id(f["Id"])
+            friend = self.srv.players.by_account_id(f["Id"])
             if friend:
                 friend.notifications.push(name, dict(fields, FriendAccountId=account["AccountId"]))
 
@@ -1298,9 +1312,9 @@ class GameHandler(BaseHTTPRequestHandler):
         before = self._defend_log_ids(defender)
         entry, score, corpses, deltas, notes = defender.state.record_defense(
             defense, profiles.account_summary(
-                attacker, self.server.guilds.header(attacker["AccountId"])))
+                attacker, self.srv.guilds.header(attacker["AccountId"])))
         self._record_guild_battle(entry, defender.state.snapshot(), attacker_trophies)
-        stats = self.server.castle_stats.info(defender.account_id)
+        stats = self.srv.castle_stats.info(defender.account_id)
         defender.notifications.push("CastleAttacked", {
             "AttackCount": stats["AttackCount"], "DeathCount": defense["deaths"],
             "DefendLogEntry": entry, "HeroCorpses": corpses,
@@ -1315,15 +1329,15 @@ class GameHandler(BaseHTTPRequestHandler):
             defender.notifications.push(name, fields)
         if defense["shield"]:
             for name, fields in defender.state.add_shield(
-                    defense["shield"], datetime.datetime.now(datetime.timezone.utc)):
+                    defense["shield"], datetime.datetime.now(datetime.UTC)):
                 defender.notifications.push(name, fields)
-        self.server.replays.remove(before - self._defend_log_ids(defender))
+        self.srv.replays.remove(before - self._defend_log_ids(defender))
 
     def _record_guild_battle(self, entry, defender, attacker_trophies):
         """Verteidigungslog-Eintrag als BattleLogEntry (Felder laut Leser des
         finalen Clients) in die Clan-Kampflogs beider Seiten."""
         summary = profiles.account_summary(
-            defender, self.server.guilds.header(defender["AccountId"]))
+            defender, self.srv.guilds.header(defender["AccountId"]))
         battle = {k: v for k, v in entry.items() if k not in (
             "$type", "Level", "TrophyScoreVariation",
             "RevengeEnabled", "AttackerCastleLevel")}
@@ -1333,7 +1347,7 @@ class GameHandler(BaseHTTPRequestHandler):
             "CastleLevel": summary["CastleLevel"],
             "AttackerTrophyScoreVariation": attacker_trophies or 0,
             "DefenderTrophyScoreVariation": entry.get("TrophyScoreVariation", 0)})
-        self.server.guilds.record_battle(battle)
+        self.srv.guilds.record_battle(battle)
 
     @staticmethod
     def _defend_log_ids(player):
@@ -1343,7 +1357,7 @@ class GameHandler(BaseHTTPRequestHandler):
     def _last_seen(self, castle_id):
         """LastSeenOnline des Burgbesitzers, wenn er ein echter Spieler ist."""
         c = castles.find_castle(castle_id)
-        p = c and self.server.players.by_account_id(c.get("AccountId"))
+        p = self.srv.players.by_account_id(c.get("AccountId")) if c else None
         return p.state.snapshot().get("LastSeenOnline") if p else None
 
     def _send_bytes(self, data: bytes):
@@ -1356,7 +1370,7 @@ class GameHandler(BaseHTTPRequestHandler):
 
     def _bling_shop(self, parts, query, entry):
         token = (query.get("t") or [""])[0]
-        p = self.server.players.for_token(token)  # nur angemeldete Spieler
+        p = self.srv.players.for_token(token)  # nur angemeldete Spieler
         if p is None:
             self._send_text("Unbekannter Spieler.\n")
             entry["response"] = {"status": 200, "content_type": "text/plain",
@@ -1365,7 +1379,7 @@ class GameHandler(BaseHTTPRequestHandler):
         message = ""
         catalog = balance.enabled()
         if catalog and parts[-1] == "buy_pack":
-            account_state.SOURCE.value = "bling-shop (%s)" % p.name  # Kontobuch
+            account_state.SOURCE.value = f"bling-shop ({p.name})"  # Kontobuch
             try:
                 pid = int((query.get("id") or ["0"])[0])
             except ValueError:
@@ -1398,7 +1412,7 @@ class GameHandler(BaseHTTPRequestHandler):
                 notifications.wallet_updated(p.notifications, delta)
                 p.tracker.track(p.account_id, tracking.PREMIUM_CASH_PURCHASED,
                                 {"Amount": amount, "WalletDelta": delta, "TestShop": True})
-                message = "%d Blings gutgeschrieben." % amount
+                message = f"{amount} Blings gutgeschrieben."
                 print(f"    [state] Test-Shop: +{amount} PremiumCash für {p.name!r}",
                       flush=True)
         elif parts[-1] == "pack":
@@ -1477,7 +1491,7 @@ class GameHandler(BaseHTTPRequestHandler):
                 # MaintenanceModeVerificationUrl: TaskCheckMaintenance zeigt bei
                 # jedem Status außer 200 LocalLauncher/launcher-maintenance.html
                 # (Antwort-Handler 0x4d6813 in PublicLauncher.exe, Body egal)
-                on = self.server.admin.maintenance
+                on = self.srv.admin.maintenance
                 self.send_response(503 if on else 200)
                 self.send_header("Content-Length", "0")
                 self.end_headers()
@@ -1496,8 +1510,8 @@ class GameHandler(BaseHTTPRequestHandler):
                                       "application/json; charset=utf-8", entry)
             cookie = http.cookies.SimpleCookie(self.headers.get("Cookie", ""))
             token = cookie["t"].value if "t" in cookie else None
-            page = patcher.login_page(self.server.players.auth.resolve(
-                urllib.parse.unquote(token) if token else None), self.server.news.html())
+            page = patcher.login_page(self.srv.players.auth.resolve(
+                urllib.parse.unquote(token) if token else None), self.srv.news.html())
             return self._send_raw(page.encode("utf-8"), "text/html; charset=utf-8", entry)
         if parts[1:2] == ["files"]:
             data = patcher.archive_by_name(parts[-1], today)
@@ -1528,12 +1542,12 @@ class GameHandler(BaseHTTPRequestHandler):
         {"Error": Schlüssel (übersetzt die Seite), bei Sperre "Until"}.
         Bann/Sperre lehnt hier ab -- das Spiel selbst zeigt dafür nur
         "Network Error" (im Original prüfte auch der Login)."""
-        players, auth_ = self.server.players, self.server.players.auth
+        players, auth_ = self.srv.players, self.srv.players.auth
         name = str(body.get("name") or "").strip()
         password = str(body.get("password") or "")
         known = name in players.index
         taken = any(n.casefold() == name.casefold() for n in players.index)
-        if self.server.admin.maintenance and not auth_.is_admin(name):
+        if self.srv.admin.maintenance and not auth_.is_admin(name):
             return {"Error": "maintenance"}  # Admins dürfen zum Testen rein
         try:
             if action == "register":
@@ -1562,7 +1576,7 @@ class GameHandler(BaseHTTPRequestHandler):
         das der Steam-Launcher mit steam_ticket abschickt. Antwort ist eine
         Seite im versteckten Iframe, die das Ergebnis an die Login-Seite
         weitergibt ({"SteamId"} oder {"Error"})."""
-        auth_ = self.server.players.auth
+        auth_ = self.srv.players.auth
         ticket = (self._form.get("steam_ticket") or [""])[0]
         key = "steam:" + self.client_address[0]  # jede Prüfung ruft Steam auf
         try:
@@ -1581,19 +1595,19 @@ class GameHandler(BaseHTTPRequestHandler):
                 result = {"Proof": auth_.steam_proof(steam_id)}
         except steam_auth.SteamError as e:
             result = {"Error": str(e)}
-        page = ("<!doctype html><script>parent.steamResult(%s);</script>"
-                % json.dumps(result).replace("<", "\\u003c"))
+        payload = json.dumps(result).replace("<", "\\u003c")
+        page = f"<!doctype html><script>parent.steamResult({payload});</script>"
         self._send_raw(page.encode("utf-8"), "text/html; charset=utf-8", entry)
 
     def _launcher_steam_new(self, body):
         """Neuer Spieler per Steam: Account mit Namen vom Steam-Profil, ohne
         Passwort. body: {"proof"} der geprüften SteamID."""
-        players, auth_ = self.server.players, self.server.players.auth
+        players, auth_ = self.srv.players, self.srv.players.auth
         proof = str(body.get("proof") or "")
         steam_id = auth_.steam_proof_id(proof)
         if steam_id is None:
             return {"Error": "steam_expired"}
-        if self.server.admin.maintenance:
+        if self.srv.admin.maintenance:
             return {"Error": "maintenance"}
         taken = lambda n: (n in players.index or auth_.has_password(n)
                            or any(x.casefold() == n.casefold() for x in players.index))
@@ -1608,18 +1622,18 @@ class GameHandler(BaseHTTPRequestHandler):
     def _launcher_session(self, name):
         """Sitzung für einen bekannten Spieler ohne Passwortprüfung (Steam):
         {"Token", "Name"} oder {"Error"} bei Wartung, Bann, Sperre."""
-        auth_ = self.server.players.auth
-        if self.server.admin.maintenance and not auth_.is_admin(name):
+        auth_ = self.srv.players.auth
+        if self.srv.admin.maintenance and not auth_.is_admin(name):
             return {"Error": "maintenance"}
-        if name in self.server.players.index and self._sanction_error(name):
+        if name in self.srv.players.index and self._sanction_error(name):
             return self._sanction_error(name)
-        self.server.players.get(name, self.client_address[0])
+        self.srv.players.get(name, self.client_address[0])
         return {"Token": auth_.login(name), "Name": name}
 
     def _sanction_error(self, name):
         """Fehler der Login-Seite zu Bann/Sperre des Spielers oder None."""
-        now = datetime.datetime.now(datetime.timezone.utc)
-        sanction = self.server.players.get(name).state.sanction(now)
+        now = datetime.datetime.now(datetime.UTC)
+        sanction = self.srv.players.get(name).state.sanction(now)
         if not sanction:
             return None
         if sanction["Status"] == 2:
@@ -1629,13 +1643,13 @@ class GameHandler(BaseHTTPRequestHandler):
     def _admin(self, method, query, body, entry):
         """AdminService.hqs (admin.py): ohne gültige HMAC-Signatur 404 wie
         der private Dienst des Originals."""
-        if not admin.authorized(self.server.admin_keys,
+        if not admin.authorized(self.srv.admin_keys,
                                 admin.path_and_query(self.path), self.command,
                                 self.headers):
             self._send_admin_error(404, "Not found", entry)
             return
         try:
-            result = self.server.admin.call(method, query, body)
+            result = self.srv.admin.call(method, query, body)
         except admin.AdminError as e:
             self._send_admin_error(e.status, str(e), entry)
             return
@@ -1652,14 +1666,14 @@ class GameHandler(BaseHTTPRequestHandler):
         (auth.set_admin) nur mit Anmeldung."""
         if not admin_web_allowed(self.client_address[0],
                                  isinstance(self.connection, ssl.SSLSocket),
-                                 self.server.players.auth.has_admins(),
-                                 self.server.admin_nets):
+                                 self.srv.players.auth.has_admins(),
+                                 self.srv.admin_nets):
             self.send_response(403)
             self.send_header("Content-Length", "0")
             self.end_headers()
             entry["response"] = {"status": 403, "content_type": "", "preview": "extern"}
             return
-        auth_ = self.server.players.auth
+        auth_ = self.srv.players.auth
         cookie = http.cookies.SimpleCookie(self.headers.get("Cookie", ""))
         token = cookie["admin_t"].value if "admin_t" in cookie else ""
         if parts[1:2] == ["session"]:  # Anmeldung am Webtool (auth.admin_login)
@@ -1691,7 +1705,7 @@ class GameHandler(BaseHTTPRequestHandler):
             return
         status = 200
         try:
-            result = self.server.admin.call(parts[2], query, body)
+            result = self.srv.admin.call(parts[2], query, body)
         except admin.AdminError as e:
             status, result = e.status, {"Error": str(e)}
         self._send_admin_json(status, result, entry)
@@ -1705,9 +1719,10 @@ class GameHandler(BaseHTTPRequestHandler):
         if cookie is not None:
             # Secure bei HTTPS: Cookies gelten für alle Ports des Hosts, sonst
             # ginge es auch an den Klartext-Port
-            self.send_header("Set-Cookie", "admin_t=%s; Path=/admin; HttpOnly; SameSite=Strict%s%s"
-                             % (cookie, "" if cookie else "; Max-Age=0",
-                                "; Secure" if isinstance(self.connection, ssl.SSLSocket) else ""))
+            max_age = "" if cookie else "; Max-Age=0"
+            secure = "; Secure" if isinstance(self.connection, ssl.SSLSocket) else ""
+            self.send_header("Set-Cookie",
+                             f"admin_t={cookie}; Path=/admin; HttpOnly; SameSite=Strict{max_age}{secure}")
         self.end_headers()
         self.wfile.write(data)
         entry["response"] = {"status": status, "content_type": "application/json",
@@ -1718,7 +1733,7 @@ class GameHandler(BaseHTTPRequestHandler):
         bei Content-Type genau application/json aus."""
         # ServiceException ist abstrakt: konkreter Typ aus Contracts.Common
         kind = "NotFoundException" if status == 404 else "InvalidParameterException"
-        data = json.dumps({"$type": "Contracts.Common.Exceptions.%s, Contracts.Common" % kind,
+        data = json.dumps({"$type": f"Contracts.Common.Exceptions.{kind}, Contracts.Common",
                            "Code": 0, "ErrorMessage": message,
                            "HttpStatusCode": status}).encode("utf-8")
         self.send_response(status)
@@ -1746,7 +1761,7 @@ class GameHandler(BaseHTTPRequestHandler):
         """Anzeigename schon vergeben (ohne Groß-/Kleinschreibung) an einen
         anderen Spieler oder einen Ersatzspieler."""
         name = name.strip().casefold()
-        others = [p.state.snapshot() for p in self.server.players.all()]
+        others = [p.state.snapshot() for p in self.srv.players.all()]
         names = [a.get("DisplayName") or "" for a in others
                  if a.get("AccountId") != own_id]
         names += [c["AccountDisplayName"] for c in castles.fake_player_castles()]
@@ -1787,15 +1802,15 @@ class GameHandler(BaseHTTPRequestHandler):
         started = time.monotonic()
         try:
             self._handle()
-        except Exception:
+        except Exception:  # noqa: BLE001 - Grenze: jeder Spiellogik-Fehler wird 500
             tb = traceback.format_exc()
             print(tb, flush=True)
             if self._entry is not None:
                 self._entry["response"] = {"status": 500, "error": tb[-500:]}
-                log_line(self.server.log_path, self._entry)
+                log_line(self.srv.log_path, self._entry)
             try:
                 self.send_error(500)
-            except Exception:
+            except OSError:  # Verbindung schon weg
                 pass
         finally:
             if self._timed:
@@ -1816,7 +1831,22 @@ class GameHandler(BaseHTTPRequestHandler):
 
 class GameHTTPServer(ThreadingHTTPServer):
     """Höchstens limits.MAX_CONNECTIONS_PER_IP gleichzeitige Verbindungen
-    je IP; weitere werden sofort geschlossen."""
+    je IP; weitere werden sofort geschlossen.
+
+    Die Attribute werden in main() gesetzt (nach dem Konstruieren); hier nur
+    deklariert, damit Typprüfer self.srv.players usw. kennen."""
+
+    log_path: str
+    responses_path: str
+    players: Any  # players.Players
+    replays: Any  # replays.Replays
+    guilds: Any  # guilds.Guilds
+    news: Any  # news.News
+    admin: Any  # admin.AdminService
+    admin_nets: Any  # Liste der --admin-net-Angaben
+    admin_keys: Any  # admin.load_keys(...)
+    competitions: Any  # competitions.Competitions
+    castle_stats: Any  # castle_stats.CastleStats
 
     def __init__(self, *a, **kw):
         self.conn_limit = limits.ConnectionLimit()
@@ -1851,14 +1881,14 @@ def tcp_honeypot(port, log_path):
             conn.settimeout(3)
             try:
                 data = conn.recv(4096)
-            except socket.timeout:
+            except TimeoutError:
                 data = b""
             print(f"\n>>> TCP:{port} Verbindung von {addr[0]}:{addr[1]} "
                   f"({len(data)} Bytes)", flush=True)
             if data:
                 print(f"    daten: {data[:300]!r}", flush=True)
             log_line(log_path, {
-                "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "ts": datetime.datetime.now(datetime.UTC).isoformat(),
                 "tcp_port": port, "client": addr[0],
                 "data": data.decode("utf-8", errors="replace")[:4000],
             })
@@ -1960,7 +1990,7 @@ def main():
     patcher.CLIENT_EXE = args.client_exe
     free_trials.FORCED_HERO = args.free_trial
     if args.free_trial and args.free_trial_minutes:
-        free_trials.FORCED_END = (datetime.datetime.now(datetime.timezone.utc)
+        free_trials.FORCED_END = (datetime.datetime.now(datetime.UTC)
                                   + datetime.timedelta(minutes=args.free_trial_minutes)
                                   ).replace(microsecond=0)
     log = lambda m: print(m, flush=True)
@@ -1998,7 +2028,7 @@ def main():
               "Netz ohne Anmeldung offen (dort einen Spieler zum Admin machen)",
               flush=True)
     log_line(args.log, {
-        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "ts": datetime.datetime.now(datetime.UTC).isoformat(),
         "server_start": True,
         "code": "http11+sl+charset+resplog+dollar-type-ready+loglock",
         "port": args.port,

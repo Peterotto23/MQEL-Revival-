@@ -54,43 +54,43 @@ def _load(*parts):
         return json.load(f)
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _gen():
     return _load("HeroItems", "EquipmentGenerationSettings.json")
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _templates():
     return _load("HeroItems", "HeroItemTemplates.json")["TemplateList"]
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _item_types():
     return {t["Id"]: t for t in _load("HeroItems", "HeroItemTypes.json")["ItemTypeList"]}
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _category_effects():
     """CategoryType ("Ring" für den Eintrag ohne Typ) -> AllowedEffects."""
     return {c.get("CategoryType", "Ring"): c.get("AllowedEffects", [])
             for c in _load("HeroItems", "HeroItemCategories.json")["CategoryList"]}
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _effect_counts():
     cats = _load("HeroItems", "EquipmentCategorySettings.json")["EquipmentCategories"]
     return {q: cats[q].get("EffectCount", 0) for q in QUALITIES}
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _magical_properties():
     return {p["Id"]: p for p in _gen()["MagicalProperties"]}
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def hero_item_types(hero_spec):
     """[(HeroItemTypeId, Gewicht)] der droppbaren Typen eines Helden."""
-    path = glob.glob(os.path.join(SETTINGS, "Heroes", "%06d - *" % hero_spec,
+    path = glob.glob(os.path.join(SETTINGS, "Heroes", f"{hero_spec:06d} - *",
                                   "Gameplay.json"))
     if not path:
         return ()
@@ -278,7 +278,7 @@ def upgrade_item(source, level, chances):
     return item
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _templates_by_id():
     return {t["Id"]: t for t in _templates()}
 
@@ -357,13 +357,13 @@ def treasure_item(castle, played_hero, hero_level):
                      hero_level=hero_level)
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def event_templates(event):
     """Template-Ids der Event-Gegenstände: SKUs "Event <Event>: ..." im
     Katalog (z. B. "Event Halloween: Ring 10"), alle ohne Preis und nie
     aktiv; wie das Original sie vergab, ist unbekannt."""
     skus = _load("ShopSettings", "ShopSkuBaseSettings.json")["Skus"]
-    prefix = "event %s:" % event.lower()
+    prefix = f"event {event.lower()}:"
     return frozenset(x["ItemId"] for x in skus if x.get("ItemType") == 3
                      and x.get("InternalDescription", "").lower().startswith(prefix))
 
@@ -411,14 +411,14 @@ def hero_effect(hero, effect_id):
                if e["Id"] == effect_id and e.get("Type", 0) == 0)
 
 
-@functools.lru_cache(maxsize=None)
-@functools.lru_cache(maxsize=None)
+@functools.cache
+@functools.cache
 def _lootable_consumables(kind):
     """Qualität -> lootbare Verbrauchsgüter des Template-Typs kind
     (CraftingMaterial, Dye); ohne Qualität gilt Basic."""
     out = {}
     for t in _load("GeneralSettings", "ConsumableSettings.json")["TemplateList"]:
-        if (t["$type"].split(",")[0].endswith(".%sConsumableTemplate" % kind)
+        if (t["$type"].split(",")[0].endswith(f".{kind}ConsumableTemplate")
                 and t.get("IsLootable")):
             out.setdefault(t.get("Quality", "Basic"), []).append(t["TemplateId"])
     return out
@@ -457,7 +457,8 @@ def creature_consumables(castle, attacker_castle_level):
     for _ in range(count):
         if random.random() >= modifier:
             continue
-        kind = CONSUMABLE_KINDS.get(_weighted(list(s["ConsumableCategoryTable"].items())))
+        category = _weighted(list(s["ConsumableCategoryTable"].items()))
+        kind = CONSUMABLE_KINDS.get(category) if category is not None else None
         quality = next((q for q in ("Epic", "Legendary", "Exceptional", "Magic")
                         if s["ConsumableQualityFrequency"].get(q)
                         and random.random() < s["ConsumableStepBase"]
@@ -525,7 +526,7 @@ def material_item(quality):
             "TemplateId": random.choice(material_templates(quality))}
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _material_packs():
     return {p["Id"]: p for p in _load("GeneralSettings", "CraftingMaterialsPacksSettings.json")
             ["CraftingMaterialsPacks"]}

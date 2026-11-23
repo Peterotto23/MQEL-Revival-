@@ -26,6 +26,7 @@ Dazu täglich (ClosingPeriod) die Belohnungen der Ranglisten-Ersten
 import datetime
 import functools
 import re
+from typing import Any
 
 import balance
 import castles
@@ -68,8 +69,8 @@ def _season_length():
 def season_end(now=None):
     """Ende der laufenden Saison (Live-Plan)."""
     plan = trophies.league_settings()["ScheduleConfigs"][0]
-    ref = datetime.datetime.fromisoformat(plan["ReferenceDate"].replace("Z", "+00:00"))
-    now = now or datetime.datetime.now(datetime.timezone.utc)
+    ref = datetime.datetime.fromisoformat(plan["ReferenceDate"])
+    now = now or datetime.datetime.now(datetime.UTC)
     done = int((now - ref).total_seconds()) // _season_length() + 1
     return ref + datetime.timedelta(seconds=done * _season_length())
 
@@ -96,8 +97,8 @@ def _ranked(accounts, by_league):
 def period_start(now=None):
     """Beginn der laufenden Wertungsperiode (ClosingPeriod, Live: 1 Tag)."""
     plan = trophies.league_settings()["ScheduleConfigs"][0]
-    ref = datetime.datetime.fromisoformat(plan["ReferenceDate"].replace("Z", "+00:00"))
-    now = now or datetime.datetime.now(datetime.timezone.utc)
+    ref = datetime.datetime.fromisoformat(plan["ReferenceDate"])
+    now = now or datetime.datetime.now(datetime.UTC)
     length = _seconds(plan["ClosingPeriod"])
     return _iso(ref + datetime.timedelta(
         seconds=int((now - ref).total_seconds()) // length * length))
@@ -204,7 +205,7 @@ def _everyone(me, players):
     return [me] + others + list(_fake_accounts())
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _fake_accounts():
     """Ersatzspieler als Mini-Accounts (wie profiles.fake_account, ohne Burg)."""
     return tuple({"AccountId": c["AccountId"], "DisplayName": c["AccountDisplayName"],
@@ -224,7 +225,9 @@ def _entry(a, header):
 def page(me, players, query, header, now=None):
     """LeaderboardPage für den Spieler `me` (Account-Snapshot); `players`
     sind alle echten Accounts, `header` liefert den Clan-Kopf einer Id."""
-    q = lambda k, d=0: query.get(k, [d])[0]
+    def q(k, d: Any = 0):
+        return query.get(k, [d])[0]
+
     num = lambda k: int(q(k)) if str(q(k)).lstrip("-").isdigit() else 0
     level, seek, size = num("level") or LEAGUES, num("seekMode") or MY_RANK, num("pageSize") or 10
     everyone = _ranked(_everyone(me, players), lambda a: True)
@@ -252,7 +255,7 @@ def page(me, players, query, header, now=None):
     else:
         start = 0
     end = season_end(now)
-    now = now or datetime.datetime.now(datetime.timezone.utc)
+    now = now or datetime.datetime.now(datetime.UTC)
     return {
         "$type": T("LeaderboardPage"),
         "ActiveCountries": (sorted({a.get("CountryCode") for a in everyone if a.get("CountryCode")})
@@ -267,7 +270,7 @@ def page(me, players, query, header, now=None):
         # Saisonende-Fenster ("Status Quo!", "Promoted!" ...); nur bis es
         # gesehen ist (Original: LastLeagueRewardViewedDate)
         "PreviousLeagueInfo": previous_league_info(me),
-        "RemainingTime": "%ds" % max(0, int((end - now).total_seconds())),
+        "RemainingTime": f"{max(0, int((end - now).total_seconds()))}s",
         "TotalCount": len(board),
         "WorldLeader": _entry(everyone[0], header),
     }

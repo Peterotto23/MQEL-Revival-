@@ -1,37 +1,38 @@
-"""Beute für PVE-Angriffe aus den GameplaySettings des Clients.
+"""Loot for PVE attacks from the client's GameplaySettings.
 
-Belegt aus den Daten:
-- Nur Kreaturen lassen in PVE etwas fallen (Traps: PVEDroppableLootTypeMask 0,
+Backed by the data:
+- Only creatures drop anything in PVE (traps: PVEDroppableLootTypeMask 0,
   AttackerRewardSettings.AllowDecorationLoot false).
-- XP je Kreatur = ConstructionPoints * XpLootBaseCpMultiplier(Burg-Level)
-  * XpLootPerLevelCpMultiplier * XpModifierTable(Levelabstand).
-- Heilkugel-Fragmente = LootableSpec.HealthOrbFragmentsLootBase
-  * HealthOrbFragmentsModifierTable(Levelabstand).
-- Schatzkammer = TreasureRoom{Min,Max}{Gold,LifeForce}Ratio der Gesamtbeute.
-- Helden-Level aus HeroSettings.XpPerLevel (kumulative Schwellen).
+- XP per creature = ConstructionPoints * XpLootBaseCpMultiplier(castle level)
+  * XpLootPerLevelCpMultiplier * XpModifierTable(level difference).
+- Health orb fragments = LootableSpec.HealthOrbFragmentsLootBase
+  * HealthOrbFragmentsModifierTable(level difference).
+- Treasure room = TreasureRoom{Min,Max}{Gold,LifeForce}Ratio of the total loot.
+- Hero level from HeroSettings.XpPerLevel (cumulative thresholds).
 
-Gold/Lebenskraft je Kreatur = ConstructionPoints * Total{Gold,LifeForce}Modifier
-* (1 + LEVEL_STEP * (Burg-Level - 1)). Geeicht an Original-Mitschnitten
-(MQELOffline_cpp, AttackService): Tutorialburg 2 (Level 1, 30.6 CP) brachte
-KillsGold 33 = KillsLifeForce 33; Burg 101 (Level 3, 79 CP) KillsGold 133,
-KillsLifeForce 119, Schatzkammer je 46. Die Formel selbst ist nicht bekannt.
+Gold/life force per creature = ConstructionPoints * Total{Gold,LifeForce}Modifier
+* (1 + LEVEL_STEP * (castle level - 1)). Calibrated against original captures
+(MQELOffline_cpp, AttackService): tutorial castle 2 (level 1, 30.6 CP) yielded
+KillsGold 33 = KillsLifeForce 33; castle 101 (level 3, 79 CP) KillsGold 133,
+KillsLifeForce 119, treasure room 46 each. The formula itself is not known.
 """
 
-import balance
 import functools
 import glob
 import json
 import os
 import random
 
+import balance
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SETTINGS = os.path.join(ROOT, "client", "GameData", "Data", "GameplaySettings")
 
 LEVEL_STEP = 0.25
 
-# Buildings/<Id>: Lager (Truhen der Schatzkammer) und Minen -> Wallet-Feld
+# Buildings/<Id>: storages (treasure room chests) and mines -> wallet field
 STORAGES = {3: "InGameCoin", 4: "LifeForce"}          # GoldStorage, LifeForceStorage
-MINES = {5: "InGameCoin", 6: "LifeForce", 16: "PremiumCash"}  # Gold/LifeForce/Bling
+MINES = {5: "InGameCoin", 6: "LifeForce", 16: "PremiumCash"}  # gold/life force/bling
 MATERIAL_MINE = 17  # Material-O-Matic (CraftingMaterialMine)
 
 
@@ -40,21 +41,21 @@ def _load(*parts):
         return json.load(f)
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def rewards():
     return _load("GeneralSettings", "AttackerRewardSettings.json")
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def xp_per_level():
     return _load("GeneralSettings", "HeroSettings.json")["XpPerLevel"]
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _creature_spec(spec_id):
-    """ConstructionPoints, HealthOrbFragmentsLootBase, Rank einer Kreatur."""
+    """ConstructionPoints, HealthOrbFragmentsLootBase, rank of a creature."""
     path = glob.glob(os.path.join(SETTINGS, "Creatures",
-                                  "%06d - *" % spec_id, "Gameplay.json"))
+                                  f"{spec_id:06d} - *", "Gameplay.json"))
     spec = {"cp": 0, "orbs": 0, "rank": "Grunt"}
     if path:
         with open(path[0], encoding="utf-8") as f:
@@ -70,29 +71,29 @@ def _creature_spec(spec_id):
 
 
 def creature(spec_id):
-    """(ConstructionPoints, HealthOrbFragmentsLootBase) einer Kreatur."""
+    """(ConstructionPoints, HealthOrbFragmentsLootBase) of a creature."""
     s = _creature_spec(spec_id)
     return s["cp"], s["orbs"]
 
 
 def creature_rank(spec_id):
-    """Grunt/Captain/Elite/Boss (CreatureSpec.Rank, Default Grunt)."""
+    """Grunt/Captain/Elite/Boss (CreatureSpec.Rank, default Grunt)."""
     return _creature_spec(spec_id)["rank"]
 
 
 def level_modifier(table, hero_level, castle_level):
-    """Wert aus einer {Minus5Levels..Plus6Levels}-Tabelle.
+    """Value from a {Minus5Levels..Plus6Levels} table.
 
-    "PlusN" = Held N Level über der Burg (weniger Ertrag), "MinusN" darunter.
+    "PlusN" = hero N levels above the castle (less yield), "MinusN" below.
     """
     diff = hero_level - castle_level
     if diff == 0:
         return table["SameLevel"]
     if diff > 0:
         n = min(diff, 6)
-        return table["Plus1Level" if n == 1 else "Plus%dLevels" % n]
+        return table["Plus1Level" if n == 1 else f"Plus{n}Levels"]
     n = min(-diff, 5)
-    return table["Minus1Level" if n == 1 else "Minus%dLevels" % n]
+    return table["Minus1Level" if n == 1 else f"Minus{n}Levels"]
 
 
 def _base_cp_multiplier(level):
@@ -103,8 +104,8 @@ def _base_cp_multiplier(level):
 
 
 def creature_loot(castle, hero_level, rare_ratio=0.0):
-    """{Entity-Id: {Gold, LifeForce, Xp, HealthOrbFragments}} der Burg.
-    rare_ratio: Loot-O-Meter-Bonus auf Gold und Lebenskraft
+    """{entity id: {Gold, LifeForce, Xp, HealthOrbFragments}} of the castle.
+    rare_ratio: Loot-O-Meter bonus on gold and life force
     (castles.rare_ratio)."""
     r = rewards()
     level = castle["Level"]
@@ -128,18 +129,18 @@ def creature_loot(castle, hero_level, rare_ratio=0.0):
     return out
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def attack_settings():
     return _load("GeneralSettings", "AttackSettings.json")
 
 
 def loss_ponderation(hero_level, castle_level, table="LossPonderationTable"):
-    """Zeile der AttackSettings.LossPonderationTable bzw.
-    MineLossPonderationTable (Verlustanteil und Schild des Verteidigers) wie
-    AttackSettingsExtensions.GetLossPonderation/GetMineLossPonderation im
-    Original-Server: Abstand = Heldenlevel des Angreifers - Burglevel des
-    Verteidigers, Zeile mit genau diesem AttackerDefenderLevelDiff (ohne
-    Angabe 0), darunter die erste, darüber die letzte."""
+    """Row of AttackSettings.LossPonderationTable or
+    MineLossPonderationTable (loss share and shield of the defender), like
+    AttackSettingsExtensions.GetLossPonderation/GetMineLossPonderation in the
+    original server: difference = attacker's hero level - defender's castle
+    level; the row with exactly this AttackerDefenderLevelDiff (0 if not
+    given), below it the first row, above it the last."""
     rows = sorted(attack_settings()[table], key=lambda r: r.get("AttackerDefenderLevelDiff", 0))
     diff = hero_level - castle_level
     exact = next((r for r in rows if r.get("AttackerDefenderLevelDiff", 0) == diff), None)
@@ -149,14 +150,14 @@ def loss_ponderation(hero_level, castle_level, table="LossPonderationTable"):
 
 
 def mine_stealable(status, castle_level, hero_level):
-    """(Beute, geschützt) einer Mine eines echten Spielers wie
-    MineManager.CalculateMineStealableAmount/-MaxStealableAmount im
-    Original: Minenschild MineShieldedAmoutDrop, leer (oder Rang 0)
-    MineEmptyAmountDrop – beides kostet den Besitzer nichts (geschützt) –,
-    sonst höchstens der Anteil nach MineLossPonderationTable an der
-    Produktion von MinePeriodStealableAmountInSeconds (Vorgabe 1 h,
-    _HourlyProduction aus castles.player_castle), höchstens der Füllstand.
-    Zerstörte Minen bleiben plünderbar."""
+    """(loot, protected) of a real player's mine, like
+    MineManager.CalculateMineStealableAmount/-MaxStealableAmount in the
+    original: mine shield MineShieldedAmoutDrop, empty (or rank 0)
+    MineEmptyAmountDrop - both cost the owner nothing (protected) -,
+    otherwise at most the share per MineLossPonderationTable of the production
+    of MinePeriodStealableAmountInSeconds (default 1 h, _HourlyProduction from
+    castles.player_castle), at most the fill level. Destroyed mines remain
+    lootable."""
     s = attack_settings()
     if status.get("_Shielded"):
         return s["MineShieldedAmoutDrop"], True
@@ -165,18 +166,18 @@ def mine_stealable(status, castle_level, hero_level):
         return s["MineEmptyAmountDrop"], True
     share = loss_ponderation(hero_level, castle_level,
                              "MineLossPonderationTable").get("AttackCastlePercentageLoss", 0)
-    # wie im Original: Math.Floor(Math.Round(Anteil * Produktion, 1) + 0.5), mindestens 1
+    # as in the original: Math.Floor(Math.Round(share * production, 1) + 0.5), at least 1
     maximum = max(1, int(round(share * production, 1) + 0.5))
     return min(maximum, status["CumulatedAmount"]), False
 
 
 def treasure_room(total_gold, total_lifeforce, castle=None, hero_level=1):
-    """(Gold, Lebenskraft) der Schatzkammer. Burg eines echten Spielers
-    (_Wallet): ein Anteil seines Wallets nach loss_ponderation, den er
-    beim Plündern verliert (LootManager.CalculateTreasureRoomStealableAmount
-    im Original-Server); sonst generiert als Anteil der Kreaturen-Beute."""
+    """(gold, life force) of the treasure room. Castle of a real player
+    (_Wallet): a share of their wallet per loss_ponderation, which they lose
+    when looted (LootManager.CalculateTreasureRoomStealableAmount in the
+    original server); otherwise generated as a share of the creature loot."""
     wallet = (castle or {}).get("_Wallet")
-    if wallet is not None:
+    if castle is not None and wallet is not None:
         share = loss_ponderation(hero_level, castle["Level"]).get("AttackCastlePercentageLoss", 0)
         return int(wallet["InGameCoin"] * share), int(wallet["LifeForce"] * share)
     r = rewards()
@@ -185,7 +186,7 @@ def treasure_room(total_gold, total_lifeforce, castle=None, hero_level=1):
 
 
 def level_for_xp(xp):
-    """Helden-Level zu kumulativer XP (Schwellen aus HeroSettings)."""
+    """Hero level for cumulative XP (thresholds from HeroSettings)."""
     table = xp_per_level()
     level = 1
     for i, need in enumerate(table):
@@ -195,18 +196,18 @@ def level_for_xp(xp):
 
 
 def stealable_buildings(castle, total_gold, total_lifeforce, hero_level=1):
-    """{Building-Id: (Wallet-Feld, Betrag, ist_Lager, geschützt)} der
-    plünderbaren Gebäude. Lager teilen sich die Schatzkammer-Beute
-    (treasure_room). Gold-/Lebenskraft-Minen echter Spieler (_MineStatuses)
-    nach mine_stealable; Bling-Minen geben ihren Füllstand her, Minen von
-    Ubisoft-Burgen UbisoftCastleMineAmountDrop. geschützt: der Besitzer
-    verliert nichts (Minenschild, leere Mine)."""
+    """{building id: (wallet field, amount, is_storage, protected)} of the
+    lootable buildings. Storages share the treasure room loot
+    (treasure_room). Gold/life force mines of real players (_MineStatuses)
+    per mine_stealable; bling mines give up their fill level, mines of
+    Ubisoft castles UbisoftCastleMineAmountDrop. protected: the owner
+    loses nothing (mine shield, empty mine)."""
     statuses = castle.get("_MineStatuses")
     tr_gold, tr_lf = treasure_room(total_gold, total_lifeforce, castle, hero_level)
     storage_amount = {"InGameCoin": tr_gold, "LifeForce": tr_lf}
-    # Ubisoft-Burgen: je Gold-/Lebenskraft-Mine pauschal
-    # UbisoftCastleMineAmountDrop (nur finale AttackSettings; die DLL von 2014
-    # kennt keine Minenbeute bei Ubisoft-Burgen, der Client liest den Wert nicht)
+    # Ubisoft castles: flat UbisoftCastleMineAmountDrop per gold/life force
+    # mine (final AttackSettings only; the 2014 DLL knows no mine loot for
+    # Ubisoft castles, the client does not read the value)
     drop = attack_settings()["UbisoftCastleMineAmountDrop"]
     mine_amount = {"InGameCoin": drop, "LifeForce": drop, "PremiumCash": 0}
     out = {}
@@ -225,7 +226,7 @@ def stealable_buildings(castle, total_gold, total_lifeforce, hero_level=1):
                 if field == "PremiumCash":
                     amount = (0 if s.get("IsDestroyed") or not s.get("IsActive", True)
                               else s.get("CumulatedAmount", 0))
-                    if balance.enabled():  # nur ein paar Stunden Produktion
+                    if balance.enabled():  # only a few hours of production
                         steal = balance.get("Mine", "StealHours")
                         steal = steal and max(1, steal // balance.get("Mine", "ProductionHours"))
                         amount = min(amount, steal)
@@ -237,12 +238,13 @@ def stealable_buildings(castle, total_gold, total_lifeforce, hero_level=1):
 
 
 def stealable_materials(castle):
-    """{Building-Id: (Zutaten, geschützt)} der Material-O-Matics
-    (AttackSettings.CraftingMaterialMine*ItemDropCount): volles Paket gibt
-    so viele seiner Zutaten her, die der Besitzer verliert; leer oder mit
-    Minenschild ebenso viele Basic-Zutaten, die ihn nichts kosten. Burgen
-    ohne Minenstände (keine Spielerburg) wie leer."""
-    import item_drops  # item_drops importiert loot
+    """{building id: (ingredients, protected)} of the Material-O-Matics
+    (AttackSettings.CraftingMaterialMine*ItemDropCount): a full pack gives up
+    that many of its ingredients, which the owner loses; empty or with a mine
+    shield, the same number of Basic ingredients, which cost the owner
+    nothing. Castles without mine statuses (no player castle) count as
+    empty."""
+    import item_drops  # item_drops imports loot
     s = attack_settings()
     statuses = castle.get("_MineStatuses") or {}
     out = {}
@@ -261,34 +263,75 @@ def stealable_materials(castle):
     return out
 
 
-# --- Seltene Bling-Beute (balance "Loot") -------------------------------------
+# --- Rare bling loot (balance "Loot") -----------------------------------------
 
-BLING_LOOT = "BlingLootLog"  # Account: [[Unix-Zeit, Blings], ...]
+BLING_LOOT = "BlingLootLog"  # account: [[Unix time, blings], ...]
 BLING_LOOT_WINDOW = 7 * 86400
 
 
 def bling_loot_left(account, now):
-    """Blings, die in den letzten 7 Tagen aus Beute noch gehen."""
+    """Blings that can still drop from loot within the last 7 days;
+    None = unlimited (WeeklyCap 0)."""
+    cap = balance.get("Loot", "WeeklyCap")
+    if cap <= 0:
+        return None
     recent = sum(n for t, n in account.get(BLING_LOOT) or []
                  if t > now - BLING_LOOT_WINDOW)
-    return max(0, balance.get("Loot", "WeeklyCap") - recent)
+    return max(0, cap - recent)
 
 
 def add_bling_drop(creature_loot, account, now, rng=random):
-    """Legt mit Loot.Chance die Blings auf eine zufällige Kreatur
-    (DefenseIngredientLoot.PremiumCash); gedeckelt auf das Restbudget."""
+    """With Loot.Chance, puts the blings on a random creature
+    (DefenseIngredientLoot.PremiumCash); capped to the remaining budget."""
     if not balance.enabled() or not creature_loot:
         return
     if rng.random() * 100 >= balance.get("Loot", "Chance"):
         return
-    amount = min(balance.get("Loot", "Amount"), bling_loot_left(account, now))
+    amount = balance.get("Loot", "Amount")
+    left = bling_loot_left(account, now)
+    if left is not None:
+        amount = min(amount, left)
     if amount > 0:
         creature_loot[rng.choice(sorted(creature_loot))]["PremiumCash"] = amount
 
 
 def record_bling_loot(account, amount, now):
-    """Beute-Blings ins gleitende Fenster eintragen (alte fallen weg)."""
+    """Enter loot blings into the rolling window (old entries drop out)."""
     log = [e for e in account.get(BLING_LOOT) or [] if e[0] > now - BLING_LOOT_WINDOW]
     if amount:
         log.append([int(now), amount])
     account[BLING_LOOT] = log
+
+# --- Boss raids (balance "Boss") ----------------------------------------------
+
+BOSS_LOG = "BossBlingLog"  # account: [[Unix time, blings], ...]
+
+
+def boss_bounty_left(account, now):
+    """Blings that boss raids can still pay within the last 7 days;
+    None = unlimited (WeeklyCap 0)."""
+    cap = balance.get("Boss", "WeeklyCap")
+    if cap <= 0:
+        return None
+    recent = sum(n for t, n in account.get(BOSS_LOG) or []
+                 if t > now - BLING_LOOT_WINDOW)
+    return max(0, cap - recent)
+
+
+def boss_bounty(account, castle_id, now):
+    """Blings for a won raid on the boss dungeon castle_id: the boss's amount
+    (balance Boss.<castle id>), capped to the remaining weekly budget; 0 when
+    the economy is off or the castle is no boss."""
+    if not balance.enabled() or castle_id not in balance.BOSS_CASTLES:
+        return 0
+    amount = balance.get("Boss", str(castle_id))
+    left = boss_bounty_left(account, now)
+    return amount if left is None else min(amount, left)
+
+
+def record_boss_bounty(account, amount, now):
+    """Enter paid boss blings into the rolling window (old entries drop out)."""
+    log = [e for e in account.get(BOSS_LOG) or [] if e[0] > now - BLING_LOOT_WINDOW]
+    if amount:
+        log.append([int(now), amount])
+    account[BOSS_LOG] = log

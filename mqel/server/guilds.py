@@ -56,7 +56,7 @@ class Guilds:
         if path and os.path.exists(path):
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
-            if "Guild" in data and data["Guild"]:  # Ein-Spieler-Format
+            if data.get("Guild"):  # Ein-Spieler-Format
                 g = data["Guild"]
                 g["Members"] = [{"AccountId": g.pop("Leader"), "Title": "Leader",
                                  "JoinDate": g.pop("JoinDate")}]
@@ -191,7 +191,7 @@ class Guilds:
         with self.lock:
             g = self.guild_of(account_id)
             members = {m["AccountId"]: m for m in g["Members"]} if g else {}
-            if (not name or member_id not in members
+            if (g is None or not name or member_id not in members
                     or members.get(account_id, {}).get("Title") != "Leader"):
                 return None
             changed = [(member_id, name)]

@@ -1,260 +1,271 @@
-# Bling-Wirtschaft (umgesetzt, Schalter im Webtool: Economy)
+# Bling Economy (implemented, switch in the web tool: Economy)
 
-Stand 17.10.2026. Ziel: Blings (PremiumCash) werden eine **erspielte** Währung.
-Echtgeld geht nicht (Rechte bei Ubisoft), Gratis-Blings (heutiger Test-Shop
-`server/bling_shop.py`) entwerten das Spiel. Shop und Preise im Client bleiben
-grundsätzlich, geändert wird vor allem, **woher** Blings kommen.
+As of 2026-10-17. Goal: Blings (PremiumCash) become an **earned** currency.
+Real money is out (the rights belong to Ubisoft), and free Blings (today's test shop
+`server/bling_shop.py`) devalue the game. The shop and prices in the client
+stay basically as they are; what changes is mainly **where** Blings come from.
 
-## Leitlinien
+## Guidelines
 
-- Blings nur für Leistung und Fortschritt, **nicht für Anwesenheit**: keine
-  Login-Boni, keine Serien (Streaks). Wer pausiert, holt es mit derselben
-  Spielzeit auf.
-- Maßvolles FOMO ist in Ordnung (Seasonal Events, Liga-Saison, Wettbewerbe),
-  solange die Belohnungen klein sind und Aussetzen nicht weh tut.
-- Helden bleiben hinter Blings (Langzeitziel); die Trial-Promos
-  (`server/free_trials.py`, Rabatt über Level-Ziele) bleiben.
-- Der Bling-Shop bleibt, verkauft aber statt Blings die früheren
-  Echtgeld-Packs (Kosmetik usw.) **gegen Blings**, auch ältere.
-- Blings vergibt nur der Server; Obergrenze je Account und Woche gegen
-  Zweitaccount-Farmen.
+- Blings only for performance and progress, **not for presence**: no
+  login bonuses, no streaks. Anyone who takes a break catches up with the same
+  play time.
+- Moderate FOMO is fine (seasonal events, league season, competitions),
+  as long as the rewards are small and missing out doesn't hurt.
+- Heroes stay behind Blings (long-term goal); the trial promos
+  (`server/free_trials.py`, discount via level goals) stay.
+- The Bling shop stays, but instead of Blings it sells the former
+  real-money packs (cosmetics etc.) **for Blings**, including older ones.
+- Only the server grants Blings; per-account weekly cap against
+  second-account farming.
 
-## Bestandsaufnahme
+## Stocktake
 
-### Ausgaben (ShopSettings/ShopSkuBaseSettings.json)
+### Spending (ShopSettings/ShopSkuBaseSettings.json)
 
-5095 SKUs, davon gut 2000 mit Bling-Preis (`CurrencyType` 1). Aktive SKUs:
+5095 SKUs, of which a good 2000 have a Bling price (`CurrencyType` 1). Active SKUs:
 
-| Art | Anzahl | Blings (min / typisch / max) | Einordnung |
+| Type | Count | Blings (min / typical / max) | Classification |
 |---|---|---|---|
-| Hero | 14 | 798 / 1200 / 3012 | Langzeitziel |
-| CastleTheme | 18 | 99 / 850 / 1500 | Kosmetik |
-| Decoration | 60 | 15 / 90 / 10000 | Kosmetik |
-| HeroUpgrade | 116 | 100 / 500 / 999 | Fortschritt |
-| HeroEquipmentItem | 748 | 0 / 80 / 19998 | Fortschritt (vieles auch für Gold) |
-| Building, Creature, Trap, …Upgrade | ~640 | meist 50–200 | Abkürzung |
-| Consumable | 65 | 5 / 60 / 700 | Abkürzung |
-| ForgeCrafted/-Reforged | je 120 | 15 / 60 / 120 | Abkürzung |
-| InventoryTabs, Room, ShowMoreCastle | 47 | 5–200 | Komfort |
+| Hero | 14 | 798 / 1200 / 3012 | Long-term goal |
+| CastleTheme | 18 | 99 / 850 / 1500 | Cosmetic |
+| Decoration | 60 | 15 / 90 / 10000 | Cosmetic |
+| HeroUpgrade | 116 | 100 / 500 / 999 | Progression |
+| HeroEquipmentItem | 748 | 0 / 80 / 19998 | Progression (many also for gold) |
+| Building, Creature, Trap, …Upgrade | ~640 | mostly 50–200 | Shortcut |
+| Consumable | 65 | 5 / 60 / 700 | Shortcut |
+| ForgeCrafted/-Reforged | 120 each | 15 / 60 / 120 | Shortcut |
+| InventoryTabs, Room, ShowMoreCastle | 47 | 5–200 | Convenience |
 
-Dazu Zeit-Skips mit Blings (`GeneralSettings/TimeSettings.json`).
+In addition, time skips for Blings (`GeneralSettings/TimeSettings.json`).
 
-Helden: Der Shop zeigt alle Helden für **950 Blings** (Promo-SKUs „PM“),
-keine Lebenskraft (im Spiel bestätigt). Die übrigen Helden-SKUs (1000
-LifeForce, Daily Deal 798/1200, Featured 3012) stehen in den Daten, werden
-aber nicht angeboten.
+Heroes: the shop shows all heroes for **950 Blings** (promo SKUs "PM"),
+no life force (confirmed in-game). The remaining hero SKUs (1000
+LifeForce, Daily Deal 798/1200, Featured 3012) are in the data but are
+not offered.
 
-### Quellen im Original (ohne Echtgeld)
+### Sources in the original (without real money)
 
-| Quelle | Menge | Datei |
+| Source | Amount | File |
 |---|---|---|
-| Ziele (Objectives) | einmalig 200 + 7 × 50 | ObjectiveSettings.json |
-| Liga-Saisonende, vordere Plätze | 5–30 | SeasonalCompetitionSettings.json (`LeaderClosingPeriodRewards`) |
-| Liga halten | 1–4 je Saison | dto. (`LeagueMaintainReward`) |
-| Wettbewerbe / Challenges | 25 / 10 / 5 für Platz 1–3 | UbisoftCompetitionSettings.json, ChallengeSettings.json |
-| Bling-Mine (Gebäude 16) | 1/h, Speicher 25, plünderbar | Buildings/000016 - BlingMine |
-| Validierung delegierter Burgen | 3 | AttackerRewardSettings.json |
-| Achievements (36) | **keine Blings** | AchievementSettings.json |
+| Objectives | one-time 200 + 7 × 50 | ObjectiveSettings.json |
+| League season end, top places | 5–30 | SeasonalCompetitionSettings.json (`LeaderClosingPeriodRewards`) |
+| Maintaining league | 1–4 per season | ditto (`LeagueMaintainReward`) |
+| Competitions / challenges | 25 / 10 / 5 for places 1–3 | UbisoftCompetitionSettings.json, ChallengeSettings.json |
+| Bling mine (building 16) | 1/h, storage 25, lootable | Buildings/000016 - BlingMine |
+| Validation of delegated castles | 3 | AttackerRewardSettings.json |
+| Achievements (36) | **no Blings** | AchievementSettings.json |
 
-Unser Server zahlt alle diese Quellen heute schon aus (objectives.py,
-leagues.py, competitions.py, castles.py für die Validierung, Mine über
-`HarvestMineBuildingCommand` mit den Originalwerten 1/h, Speicher 25).
-Produktion und Speicher der Mine stehen in den Gebäudedaten, die auch der
-Client anzeigt: Änderung per Daten-Patch (DataBin, über den Patcher
-umkehrbar).
+Our server already pays out all of these sources today (objectives.py,
+leagues.py, competitions.py, castles.py for validation, the mine via
+`HarvestMineBuildingCommand` with the original values 1/h, storage 25).
+The mine's production and storage are in the building data, which the
+client also displays: change via data patch (DataBin, reversible through
+the patcher).
 
-Ohne Geld kamen im Original also nur wenige hundert Blings zusammen; ein Held
-(~1000) war praktisch unerreichbar. Die Bling-Mine ist mit kleinem Speicher
-genau das Abholen-nach-Zeitplan-Muster, das wir vermeiden wollen.
+Without money, only a few hundred Blings added up in the original; a hero
+(~1000) was practically unreachable. With its small storage, the Bling mine is
+exactly the collect-on-a-schedule pattern we want to avoid.
 
 ### Special Packs (GeneralSettings/SpecialPackSettings.json)
 
-75 Packs: 56 „Diamond“, 11 „DoubleO“/„DoubleOV2“, 8 einzelne (u. a. Infinite
-Pack 72, Halloween 67). Inhalte: Ausrüstung (60 Packs), früher Heldenzugang
-(39), Monster (24), Themes (19), Helden-Boosts (17), Inventar-Tabs (22),
-Fallen, Dekorationen, Emotes, Materialien. **21 Packs enthalten selbst
-Blings** (z. B. „Chunk of Change“ 1500), die beim Verkauf gegen Blings
-herausfallen müssen.
+75 packs: 56 "Diamond", 11 "DoubleO"/"DoubleOV2", 8 individual (among others Infinite
+Pack 72, Halloween 67). Contents: equipment (60 packs), early hero access
+(39), monsters (24), themes (19), hero boosts (17), inventory tabs (22),
+traps, decorations, emotes, materials. **21 packs contain Blings
+themselves** (e.g. "Chunk of Change" 1500), which must be removed when sold
+for Blings.
 
-## Entwurf (Zahlen zum Diskutieren)
+## Draft (numbers for discussion)
 
-Bezugsgröße ist **aktive Spielzeit**, nicht Kalenderzeit. Annahme
-„normaler“ Spieler: etwa 4 Stunden pro Woche.
+The reference measure is **active play time**, not calendar time. Assumption for a
+"normal" player: roughly 4 hours per week.
 
-| Ziel | Zielzeit | ≈ Spielstunden |
+| Goal | Target time | ≈ Play hours |
 |---|---|---|
-| erstes Kosmetik-Teil (~100) | erste Tage | 2–3 h |
-| zweiter Held (950) | 2–3 Wochen | ~10 h |
-| jeder weitere Held | 1–2 Monate | 20–30 h |
-| großes Pack | einige Wochen | 15–25 h |
-| alles Premium | viele Monate | 200+ h |
+| first cosmetic item (~100) | first days | 2–3 h |
+| second hero (950) | 2–3 weeks | ~10 h |
+| every further hero | 1–2 months | 20–30 h |
+| big pack | a few weeks | 15–25 h |
+| everything premium | many months | 200+ h |
 
-Daraus zwei Einnahmeströme:
+This yields two income streams:
 
-1. **Einmaliger Topf (~3000 Blings)**, verteilt auf Achievements (~1500) und
-   Ziele (1550). Meilensteine entfallen (keine Client-UI). Trägt den Anfang,
-   damit der zweite Held schnell kommt.
-2. **Laufend ~30–40 Blings je Spielstunde**: seltene Bling-Beute beim Plündern
-   (größter Anteil), dazu Liga und Wettbewerbe als kleiner Zuschlag
-   (Original-Werte etwa verdoppelt), Seasonal Events mit kleinen Preisen.
-   Bling-Mine siehe unten.
+1. **One-time pot (~3000 Blings)**, distributed over achievements (~1500) and
+   objectives (1550). Milestones are dropped (no client UI). Carries the start
+   so that the second hero comes quickly.
+2. **Ongoing ~30–40 Blings per play hour**: rare Bling loot when pillaging
+   (largest share), plus league and competitions as a small bonus
+   (original values roughly doubled), seasonal events with small prizes.
+   Bling mine see below.
 
-**Pack-Preise:** aus dem Inhalt abgeleitet, nicht aus dem alten Euro-Preis:
-Summe der Bling-Preise der Einzelteile mit Paket-Rabatt, ohne enthaltene
-Blings; Packs, die vor allem Abkürzungen enthalten, mit Aufschlag oder gar
-nicht. Ohne Wert (entschieden 17.10.2026): **früher Heldenzugang** (Relikt der
-Entwicklungszeit) fällt weg; **Emotes** bleiben drin, zählen aber nicht zum
-Preis (praktisch Einzelspieler, sieht höchstens jemand im Replay). Damit
-bleibt von 4 Packs nichts übrig, sie entfallen: 16 „Runaway Only“, 17 „Mage
-Only“ (nur Heldenzugang), 19 „PC Gamer Bling Pack“, 70 „Steam Big Bling
-Pack“ (nur Blings).
+**Pack prices:** derived from the contents, not from the old euro price:
+sum of the Bling prices of the individual items with a bundle discount, excluding
+contained Blings; packs that mainly contain shortcuts get a surcharge or are
+not offered at all. Without value (decided 2026-10-17): **early hero access**
+(a relic of development time) is dropped; **emotes** stay in but don't count
+toward the price (practically single-player, at most someone sees them in a
+replay). That leaves nothing in 4 packs, so they are dropped: 16 "Runaway Only", 17 "Mage
+Only" (hero access only), 19 "PC Gamer Bling Pack", 70 "Steam Big Bling
+Pack" (Blings only).
 
-### Bling-Mine
+### Bling mine
 
-Heute gibt unser Server beim Plündern den **ganzen Füllstand** her
-(`loot.stealable_buildings`); Gold-/Lebenskraft-Minen nur die Produktion der
-letzten Stunde (`mine_stealable`, `MinePeriodStealableAmountInSeconds`). Mit
-großem Speicher wäre ein Wenigspieler sonst ein Jackpot und müsste doch
-täglich abholen. Daher:
+Today our server hands over the **entire fill level** when looted
+(`loot.stealable_buildings`); gold/life force mines only the last hour's
+production (`mine_stealable`, `MinePeriodStealableAmountInSeconds`). With a
+large storage, a low-activity player would otherwise be a jackpot for attackers
+and would still have to collect daily. Therefore:
 
-- Plünderbar höchstens eine Stunde Produktion (mindestens
-  `PremiumCashMineLossAmount` = 1), der Rest bleibt dem Besitzer.
-- Zerstören setzt nur den Ertrag dieses Angriffs auf null, nicht den Inhalt.
-- Produktion 1/h, Speicher 42 (voll nach 42 h): belohnt bewusst Spieler, die
-  alle 1–2 Tage abholen (~150–168 je Woche); wöchentlich nur 42 (entschieden
-  09.11.2026).
-- Preis 500 statt 999 Blings (`Mine.Price`, Daten-Patch der SKU 15522 in
-  ShopSkuBaseSettings, Server bucht über `balance.sku_price`): bei Abholen
-  alle 2–3 Tage nach ~3–5 Wochen verdient, für einen Mittelspieler etwa 3
-  Wochen Einkommen; mit 999 waren es bis zu 24 Wochen.
-- Bis zu drei Bling- und drei Material-Minen je Burg (BuildingInstanceRequirements,
-  ab Burgherz 2), wie im Original: Shop-SKUs 15522 (Bling-Mine, 500 Blings, Original 999) und
-  15699 (Material-Mine, 500 Blings) mit Kontingent 3 (`special_packs.SHOP_QUOTAS`);
-  Pack-Minen (Infinite Pack, Material-O-Matic) zählen zur selben Grenze, die
-  der Server beim Bauen prüft.
+- At most one hour of production is lootable (minimum
+  `PremiumCashMineLossAmount` = 1), the rest stays with the owner.
+- Destroying only sets the yield of this attack to zero, not the contents.
+- Production 1/h, storage 42 (full after 42 h): deliberately rewards players who
+  collect every 1–2 days (~150–168 per week); weekly only 42 (decided
+  2026-11-09).
+- Price 500 instead of 999 Blings (`Mine.Price`, data patch of SKU 15522 in
+  ShopSkuBaseSettings, the server books via `balance.sku_price`): earned back after ~3–5
+  weeks when collecting every 2–3 days, about 3 weeks of income for an average
+  player; with 999 it was up to 24 weeks.
+- Up to three Bling mines and three material mines per castle (BuildingInstanceRequirements,
+  from castle heart 2), as in the original: shop SKUs 15522 (Bling mine, 500 Blings, original 999) and
+  15699 (material mine, 500 Blings) with quota 3 (`special_packs.SHOP_QUOTAS`);
+  pack mines (Infinite Pack, Material-O-Matic) count toward the same limit, which
+  the server checks when building.
 
-### Hochrechnung
+### Projection
 
-Annahmen: Beute 25 Blings je Spielstunde; einmaliger Topf 2500 über die
-ersten ~60 Spielstunden (~42/h, bis er leer ist); Liga/Wettbewerbe 5–60 je
-Woche; Mine 42 je Woche.
+Assumptions: loot 25 Blings per play hour; one-time pot 2500 over the
+first ~60 play hours (~42/h until it is empty); league/competitions 5–60 per
+week; mine 42 per week.
 
-| Spieler | Spielzeit/Woche | Blings/Woche anfangs | danach | 2. Held (950) | weitere Helden |
+| Player | Play time/week | Blings/week at first | afterwards | 2nd hero (950) | further heroes |
 |---|---|---|---|---|---|
-| Wenig | 1 h | ~115 | ~72 | ~8 Wochen | ~13 Wochen |
-| Mittel | 4 h | ~330 (15 Wochen) | ~160 | ~3 Wochen | ~6 Wochen |
-| Viel | 15 h | ~1090 (4 Wochen) | ~470 | < 1 Woche | ~2 Wochen |
-| Extrem | 40 h | Topf nach ~1,5 Wochen leer | ~700 (Grenze) | < 1 Woche | ~1,5 Wochen |
+| Light | 1 h | ~115 | ~72 | ~8 weeks | ~13 weeks |
+| Average | 4 h | ~330 (15 weeks) | ~160 | ~3 weeks | ~6 weeks |
+| Heavy | 15 h | ~1090 (4 weeks) | ~470 | < 1 week | ~2 weeks |
+| Extreme | 40 h | pot empty after ~1.5 weeks | ~700 (cap) | < 1 week | ~1.5 weeks |
 
-Alles Premium (Helden, 18 Themes, Dekorationen, Packs) grob 30.000–40.000:
-Mittelspieler Jahre, Vielspieler ~1,5 Jahre.
+Everything premium (heroes, 18 themes, decorations, packs) roughly 30,000–40,000:
+years for an average player, ~1.5 years for a heavy player.
 
-### Obergrenze
+### Cap
 
-**Wochengrenze statt Tagesgrenze** (eine Tagesgrenze belohnt tägliches
-Spielen): höchstens 600 Blings aus Beute in den letzten 7 Tagen. Trifft nur
-Extremspieler und Farm-Accounts. Einmaliger Topf und Liga sind nicht
-begrenzt (endlich bzw. selten).
+**Weekly cap instead of daily cap** (a daily cap rewards playing every day):
+at most 600 Blings from loot in the last 7 days. Only affects extreme
+players and farm accounts. The one-time pot and league are not capped (finite
+or rare, respectively).
 
-### Abkürzungen
+### Shortcuts
 
-In Spielzeit (25 Blings/h): Zeit-Skip 5 min / 1 h / 24 h = 5 / 50 / 850
-Blings ≈ 12 min / 2 h / 34 h; Monster oder Falle direkt 50–200 ≈ 2–8 h;
-Materialpaket 50–200 ≈ 2–8 h; Inventar-Tab 200 ≈ 8 h; Validierung
-delegieren 10 ≈ 25 min. Bei erspielten Blings begrenzen sich die
-Originalpreise selbst: **nichts sperren, nichts verteuern**, kein Preis-Patch
-nötig. Gold/Lebenskraft gegen Blings gibt es in den Daten nicht.
+In play time (25 Blings/h): time skip 5 min / 1 h / 24 h = 5 / 50 / 850
+Blings ≈ 12 min / 2 h / 34 h; monster or trap bought directly 50–200 ≈ 2–8 h;
+material pack 50–200 ≈ 2–8 h; inventory tab 200 ≈ 8 h; delegating
+validation 10 ≈ 25 min. With earned Blings, the original prices limit
+themselves: **block nothing, make nothing more expensive**, no price patch
+needed. Gold/life force for Blings does not exist in the data.
 
-### Pack-Auswahl (entschieden 17.10.2026)
+### Pack selection (decided 2026-10-17)
 
-Je Pack ein fester Preis statt Summe der Einzelteile; Liste mit Inhalt und
-Entscheidung in `docs/analysis/special-packs.md`. **23 Packs im Angebot**,
-Preise 300–4000 (Spitze: 66 The Big Pack und 72 Infinite Pack je 4000);
-Halloween (67) nur während des Events; 74 Beta-QC-Belohnungen als
-Premium 2500. Entfallen: interne Packs (21 alle Pets, 68 Golden Pony),
-Duplikate und Promo-Kopien, 56 Limited Edition (Gegenwert zu hoch),
-57 Sick Creatures (bleiben rausgepatcht). Kann bis zum Livegang noch
-nachjustiert werden.
+One fixed price per pack instead of the sum of the individual items; list with contents and
+decision in `docs/analysis/special-packs.md`. **23 packs on offer**,
+prices 300–4000 (top: 66 The Big Pack and 72 Infinite Pack at 4000 each);
+Halloween (67) only during the event; 74 Beta QC Rewards as
+premium 2500. Dropped: internal packs (21 All Pets, 68 Golden Pony),
+duplicates and promo copies, 56 Limited Edition (equivalent value too high),
+57 Sick Creatures (stay patched out). Can still be
+readjusted before going live.
 
-## Umsetzung
+## Implementation
 
-- **Stellschrauben** (`server/balance.py`, `state/<Profil>/balance.json`):
-  Schalter `Enabled` (Vorgabe aus) und die Werte, im Webtool unter
-  **Economy** (admin.Get/SetBalance, Grenzen geprüft). Bisher: Bling-Mine.
-- **Client-Werte** (im Webtool mit „client“ markiert) kommen per Patcher in
-  `settings.bin`: DataBin-Version `…​.B<CRC>`; jeder Stand bleibt in
-  `History`, damit Deltas auch von älteren Ständen gehen. settings.bin ist
-  immer im DataBin-Paket (Original, wenn aus), damit Ausschalten zurück zum
-  Original führt. Eigener LZO-Packer (settings_archive.lzo_compress): ~4 MB
-  Delta, Bau ~17 s beim ersten Abruf.
-- **Bling-Mine:** castles.mine_rank liefert bei Enabled ProductionPeriod/
-  Capacity aus balance; loot.stealable_buildings begrenzt die Beute auf
-  StealHours Produktion (mindestens 1). Eine neu gebaute Bling-Mine startet
-  leer wie im Original (MineManager.AddMineStatus); Ernten meldet
-  EntityHarvestType PremiumCashMine (nur im finalen Client).
-- **Achievements:** Betrag je Achievement im Webtool (Vorgabe Punkte × 2,
-  zusammen ~1500, Art „UI“). Ausgezahlt einmal je Achievement zum dann
-  gültigen Betrag, auch rückwirkend für schon erreichte, sobald die
-  Bling-Wirtschaft an ist (`AchievementBlingsPaid` im Account, Kontobuch
-  Quelle `achievements`). Anzeige: UI-Patch 9 (ui_patches.py) setzt im
-  Popup unter die Punkte „+N“ mit Bling-Symbol; die Beträge stecken im
-  Helfer `achievementBlings` (hyperquest.extensions.js), daher ändert jede
-  Änderung die GameUI-Version. Ältere GameUI-Stände bekommen alle Dateien
-  neu (vorher: gar kein Patch mehr).
-- **Ziele (Objectives):** Bling-Betrag je Ziel mit Bling-Belohnung (8 Stück,
-  Art „client“): Vorgabe 200 für Snottingham und die sechs Bosse, 150 für
-  Heist Part 2 (Original 200 + 7 × 50 = 550, jetzt 1550). Der Client zeigt
-  sie selbst an (ObjectiveSettings in settings.bin, mit der Mine neu
-  gepackt); objectives.rewards zahlt denselben Betrag. Schon abgeschlossene
-  Ziele bekommen nichts nach.
-- **Bling-Beute:** Bei echten Angriffen (ohne Übung, Tutorial, Wettbewerb)
-  trägt mit `Loot.Chance` (Vorgabe 40 %) eine zufällige Kreatur
-  `Loot.Amount` Blings (Vorgabe 10; DefenseIngredientLoot.PremiumCash).
-  Gutgeschrieben beim Töten (KilledCreatureIds; eine eigene Id-Liste für
-  Blings meldet der Client nicht), im Bericht unter TotalPremiumCash.
-  Grenze `Loot.WeeklyCap` (600) im gleitenden 7-Tage-Fenster
-  (`BlingLootLog` im Account); das Restbudget deckelt schon den Drop.
-- **Liga und Wettbewerbe:** je ein Prozentfaktor auf alle Bling-Beträge
-  (Vorgabe 200 %, Art „client“): SeasonalCompetitionSettings bzw.
-  UbisoftCompetitionSettings in settings.bin, der Server rechnet gleich
-  (balance.scale_reward in leagues.settle und competitions.reward).
-- **Bling-Shop:** bei Enabled zeigt `/blings` (Knopf „Purchase blings“) die
-  Packs als Karten mit Inhalt und Preis (Economy-Abschnitt Shop, 0 = nicht im
-  Angebot; 67 Halloween nur im Event). Kauf: AccountState.buy_special_pack
-  bucht ab und schaltet frei (Kontobuch `bling-shop`); Ausrüstung,
-  Verbrauchsgüter und Material kommen ins Inventar (ohne Platz kostenlos in
-  den Rückkauf) und werden als Notifications gemeldet. Die kostenlosen
-  Test-Buchungen gibt es nur noch bei ausgeschalteter Wirtschaft.
-  Heldenzugang: bei Enabled fehlt EarlyHeroAccess in den Packs, im Server
-  (special_packs.pack) und in settings.bin (balance.DATA_REVISION 2), damit
-  Helden nur für Blings kommen; schon angelegte Helden bleiben.
+- **Tuning knobs** (`server/balance.py`, `state/<profile>/balance.json`):
+  `Enabled` switch (default off) and the values, in the web tool under
+  **Economy** (admin.Get/SetBalance, limits validated). So far: Bling mine.
+- **Client values** (marked "client" in the web tool) arrive via the patcher in
+  `settings.bin`: DataBin version `….B<CRC>`; every state stays in
+  `History` so that deltas also work from older states. settings.bin is
+  always in the DataBin package (original when off) so that switching off leads
+  back to the original. Own LZO packer (settings_archive.lzo_compress): ~4 MB
+  delta, build ~17 s on first request.
+- **Bling mine:** when Enabled, castles.mine_rank delivers ProductionPeriod/
+  Capacity from balance; loot.stealable_buildings limits the loot to
+  StealHours of production (minimum 1). A newly built Bling mine starts
+  empty like in the original (MineManager.AddMineStatus); harvesting reports
+  EntityHarvestType PremiumCashMine (only in the final client).
+- **Achievements:** amount per achievement in the web tool (default points × 2,
+  together ~1500, type "UI"). Paid out once per achievement at the amount valid
+  at that time, also retroactively for ones already reached, as soon as the
+  Bling economy is on (`AchievementBlingsPaid` in the account, ledger
+  source `achievements`). Display: UI patch 9 (ui_patches.py) puts "+N" with a
+  Bling symbol under the points in the popup; the amounts live in the
+  helper `achievementBlings` (hyperquest.extensions.js), so every
+  change alters the GameUI version. Older GameUI states get all files
+  anew (before: no patch at all anymore).
+- **Objectives:** Bling amount per objective with a Bling reward (8 of them,
+  type "client"): default 200 for Snottingham and the six bosses, 150 for
+  Heist Part 2 (original 200 + 7 × 50 = 550, now 1550). The client displays
+  them itself (ObjectiveSettings in settings.bin, repacked together with the mine);
+  objectives.rewards pays the same amount. Already completed
+  objectives get nothing retroactively.
+- **Bling loot:** in real attacks (excluding practice, tutorial, competition),
+  with `Loot.Chance` (default 40%) a random creature carries
+  `Loot.Amount` Blings (default 10; DefenseIngredientLoot.PremiumCash).
+  Credited when killed (KilledCreatureIds; the client reports no separate
+  ID list for Blings), shown in the report under TotalPremiumCash.
+  Cap `Loot.WeeklyCap` (600) in a rolling 7-day window
+  (`BlingLootLog` in the account); the remaining budget already caps the drop.
+- **Boss raids (repeatable):** every won raid (CompletionType TreasureRoom) on
+  a region's boss dungeon (castle ids 14-20, AttackAdvisorSettings.BossCastleId)
+  pays the boss's amount from `Boss.<castle id>` (default 10, 20, ... 70, rising
+  per region; server-only, no client patch), on top of the one-time quest reward
+  and as often as the player clears it. Credited with the attack
+  (`attack.boss_raid_blings` -> `gains["boss_bounty"]`, part of
+  `TotalPremiumCash` in the report, ledger kind `boss`). Not paid for practice,
+  validation, tutorial, competitions, a lost or aborted raid, or a fight the
+  anticheat flagged. Optional cap `Boss.WeeklyCap` (default 0 = unlimited) in a
+  rolling 7-day window (`BossBlingLog` in the account), shared by all bosses; the
+  remaining budget caps the payout.
+- **League and competitions:** one percentage factor each on all Bling amounts
+  (default 200%, type "client"): SeasonalCompetitionSettings and
+  UbisoftCompetitionSettings in settings.bin, respectively; the server calculates the same
+  way (balance.scale_reward in leagues.settle and competitions.reward).
+- **Bling shop:** when Enabled, `/blings` (button "Purchase blings") shows the
+  packs as cards with contents and price (Economy section Shop, 0 = not on
+  offer; 67 Halloween only during the event). Purchase: AccountState.buy_special_pack
+  deducts and unlocks (ledger `bling-shop`); equipment,
+  consumables and materials go into the inventory (without space, for free into
+  the buyback) and are reported as notifications. The free
+  test bookings only exist when the economy is switched off.
+  Hero access: when Enabled, EarlyHeroAccess is missing from the packs, in the server
+  (special_packs.pack) and in settings.bin (balance.DATA_REVISION 2), so that
+  heroes come only for Blings; heroes already created stay.
 
-## Weg zurück
+## Way back
 
-1. **Schalter auf dem Server** (wie der Wartungsmodus), zunächst aus; aus =
-   heutige Regeln.
-2. **Preisänderungen im Client** nur über Patcher-Pakete (Deltas auf die
-   Steam-Dateien); Paket entfernen = Originalpreise beim nächsten Start.
-3. **Kontobuch:** jede Bling-Gutschrift und jeder Pack-Kauf mit Quelle, zur
-   Auswertung der Balance und für gezielte Korrekturen.
-   **Umgesetzt:** `state/<Profil>/<AccountId>.blings.jsonl`, eine Zeile je
-   Änderung {Time, Delta, Balance, Source}; Source = Anfrage
-   (`Dienst/Methode (Spieler)`), bei Commands mit `cmd:<Name>`, beim
-   Webtool `admin:<Methode>` (AccountState._book beim Speichern, Quelle je
-   Thread in account_state.SOURCE).
-4. **Sicherung des Spielstands** beim Umschalten (nur Notfall).
+1. **Switch on the server** (like maintenance mode), off at first; off =
+   today's rules.
+2. **Price changes in the client** only via patcher packages (deltas against the
+   Steam files); removing the package = original prices at the next start.
+3. **Ledger:** every Bling credit and every pack purchase with its source, for
+   evaluating the balance and for targeted corrections.
+   **Implemented:** `state/<profile>/<AccountId>.blings.jsonl`, one line per
+   change {Time, Delta, Balance, Source}; Source = request
+   (`Service/Method (player)`), for commands `cmd:<Name>`, for the
+   web tool `admin:<Method>` (AccountState._book on saving, source per
+   thread in account_state.SOURCE).
+4. **Backup of the save state** when switching (emergency only).
 
-**Regel beim Zurückschalten:** Spieler behalten alles Erspielte, auch Blings.
-Korrigiert wird nur nach vorn (Einnahmen, Preise). Weggenommen wird nur bei
-Missbrauch (Bug, Exploit, Zweitaccounts), gezielt über das Kontobuch. Muss
-doch einmal eingegriffen werden: Umtausch zu einem angekündigten Kurs oder
-Einfrieren, nie ersatzlos streichen.
+**Rule when switching back:** players keep everything they earned, including Blings.
+Corrections only go forward (income, prices). Things are only taken away on
+abuse (bug, exploit, second accounts), in a targeted way via the ledger. If
+intervention is ever needed after all: exchange at an announced rate or
+freezing, never deleting without compensation.
 
-## Offene Fragen
+## Open questions
 
-- Achievements: Client kennt keine Belohnung (nur Titel, Beschreibung,
-  Punkte). Entschieden: hardcoden, Beträge je Achievement-Id im Server und
-  per UI-Patch als Zeile „+N Blings“ im Popup
+- Achievements: the client knows no reward (only title, description,
+  points). Decided: hard-code it, amounts per achievement ID in the server and
+  via UI patch as a line "+N Blings" in the popup
   (`template-achievement-completed-popup`).
-- Bling-Beute: der Bericht zeigt sie (`TotalPremiumCash`), einen sichtbaren
-  Drop im Kampf nicht; so belassen.
+- Bling loot: the report shows it (`TotalPremiumCash`), a visible
+  drop during combat it does not; leave it that way.

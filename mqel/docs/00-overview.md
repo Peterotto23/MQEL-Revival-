@@ -1,44 +1,43 @@
-# MQEL Revival — Übersicht
+# MQEL Revival — Overview
 
-**Ziel:** Einen kompatiblen Gameserver für *The Mighty Quest for Epic Loot*
-(Ubisoft, 2014–2015, Opal-Engine, PC) bauen, sodass das Spiel mit den
-vorliegenden Client-Dateien wieder spielbar wird. Eine 1:1-Wiederherstellung
-ist unmöglich (keine serverseitigen Daten/DBs bekannt); angestrebt wird ein
-sauberer Nachbau des **Client↔Server-Protokolls** mit neu implementierter
-Spiellogik.
+**Goal:** Build a compatible game server for *The Mighty Quest for Epic Loot*
+(Ubisoft, 2014–2015, Opal engine, PC) so that the game becomes playable again
+with the client files at hand. A 1:1 restoration is impossible (no server-side
+data/DBs are known); the aim is a clean rebuild of the **client↔server
+protocol** with newly implemented game logic.
 
-**Kurzbefund (Stand 13.10.2026):**
+**Key findings (as of 2026-10-13):**
 
-- `main.348.1_232184_GameplayToolbox.7z` enthält **keinen lauffähigen Server**,
-  aber etwas fast genauso Wertvolles: die kompletten **.NET-Serverassemblies**
-  (`HyperQuest.GameServer.dll`, `*.Contracts.dll`, `Util.*.dll`) inkl.
-  XML-Dokumentation und PDBs. Daraus ist das **gesamte Server-API**
-  (Services, Methoden, Parameter, DTOs) rekonstruierbar.
-- Das Client↔Server-Protokoll ist **HTTP + JSON**, selbst gebaut
-  („Argo“-Service-Framework, kein WCF/REST-Standard). URL-Schema,
-  Header, Auth- und Anti-Cheat-HMAC sind statisch rekonstruiert
-  (Details: `30-protokoll.md`, `40-auth.md`).
-- Der Spiel-Client besteht aus zwei Prozessen: `MightyQuest.exe` (gepackt,
-  enthält Netzwerk-/HTTP-Code) und `MightyQuestWorker.exe` (ungepackt,
-  Simulation/Replay, spricht via Named Pipe mit dem Master).
-- Die Server-Settings (`GameplaySettings/*.json`, ~8700 Dateien) liegen in
-  `0.36.1.34.0_104956_GameData.7z` und können vom Nachbau **direkt von Platte**
-  gelesen werden — genau wie vom Original (`GameplaySettingsPath`).
+- `main.348.1_232184_GameplayToolbox.7z` contains **no runnable server**,
+  but something almost as valuable: the complete **.NET server assemblies**
+  (`HyperQuest.GameServer.dll`, `*.Contracts.dll`, `Util.*.dll`) including
+  XML documentation and PDBs. The **entire server API** (services, methods,
+  parameters, DTOs) can be reconstructed from them.
+- The client↔server protocol is **HTTP + JSON**, home-built (the "Argo"
+  service framework, not WCF/standard REST). URL scheme, headers, and
+  auth and anti-cheat HMAC have been reconstructed statically
+  (details: `30-protokoll.md`, `40-auth.md`).
+- The game client consists of two processes: `MightyQuest.exe` (packed,
+  contains the network/HTTP code) and `MightyQuestWorker.exe` (unpacked,
+  simulation/replay, talks to the master via a named pipe).
+- The server settings (`GameplaySettings/*.json`, ~8700 files) are in
+  `0.36.1.34.0_104956_GameData.7z` and can be read by the rebuild **directly
+  from disk** — exactly like the original (`GameplaySettingsPath`).
 
-**Doku-Struktur:**
+**Doc structure:**
 
-| Datei | Inhalt |
+| File | Contents |
 |---|---|
-| `10-quellen.md` | Inventar der 5 Archive, was wo drin ist |
-| `20-architektur.md` | Prozesse, Launcher-Flow, Server-Komponenten, Abhängigkeiten |
-| `30-protokoll.md` | HTTP+JSON-Protokoll (URL-Schema, Verben, Header, Envelopes, Versionierung) |
-| `31-services.md` | Service-Katalog (welche Services das Spiel wirklich braucht) |
-| `40-auth.md` | Login-Flow, ConnectionToken, `[Authenticated]`, Client-HMAC (Murmur3) |
-| `50-revival-plan.md` | Bauplan: was zu implementieren ist, in welcher Reihenfolge |
-| `analysis/api-gameserver.txt` | Vollständige API-Map (Service → Methoden, Parameter, Verben) |
-| `analysis/api-common.txt` | API-Map der Shared-Contracts (Tracking, CrashReport, …) |
+| `10-quellen.md` | Inventory of the 5 archives, what is in each |
+| `20-architektur.md` | Processes, launcher flow, server components, dependencies |
+| `30-protokoll.md` | HTTP+JSON protocol (URL scheme, verbs, headers, envelopes, versioning) |
+| `31-services.md` | Service catalog (which services the game really needs) |
+| `40-auth.md` | Login flow, ConnectionToken, `[Authenticated]`, client HMAC (Murmur3) |
+| `50-revival-plan.md` | Build plan: what to implement, in what order |
+| `analysis/api-gameserver.txt` | Complete API map (service → methods, parameters, verbs) |
+| `analysis/api-common.txt` | API map of the shared contracts (Tracking, CrashReport, …) |
 
-**Werkzeuge** liegen in `../tools/` (siehe `../tools/README.md`):
-`ildump.py` (IL-Disassembler), `dnbrowse.py` (Typ-/String-Browser),
-`cadecode.py` (Custom-Attribute-Dekoder), `apimap.py` (API-Map-Generator),
-`callfinder.py` (Caller-Suche).
+**Tools** live in `../tools/` (see `../tools/README.md`):
+`ildump.py` (IL disassembler), `dnbrowse.py` (type/string browser),
+`cadecode.py` (custom attribute decoder), `apimap.py` (API map generator),
+`callfinder.py` (caller search).

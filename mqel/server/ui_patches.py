@@ -88,16 +88,16 @@ def hero_name(game_data, lang):
     names = json.loads(path.read_text(encoding="utf-8-sig"))["Translations"]
     out = ""
     for i, (key, oasis_id) in enumerate(HERO_NAME_IDS.items()):
-        out += "{{%s News.Data.HeroName=='%s'}}%s" % (
-            "if" if i == 0 else "else", key, names[oasis_id])
+        keyword = "if" if i == 0 else "else"
+        out += f"{{{{{keyword} News.Data.HeroName=='{key}'}}}}{names[oasis_id]}"
     return out + "{{else}}" + HERO_NAME + "{{/if}}"
 
 
 def topview_patches(game_data, lang, path, achievement_blings=True):
-    patches = [
+    patches: list[tuple[str, ...]] = [  # (alt, neu[, "alle"])
         # 2.
-        ('{{if ~enumValueCompare(Reward.RewardItems[0].Type, "CurrencyAmount", '
-         '"hyperquest.enums.RewardItemType")}}',
+        (('{{if ~enumValueCompare(Reward.RewardItems[0].Type, "CurrencyAmount", '
+          '"hyperquest.enums.RewardItemType")}}'),
          "{{if Reward.RewardItems[0].CurrencyAmount}}", "alle"),
     ]
     if lang == "en":
@@ -109,11 +109,11 @@ def topview_patches(game_data, lang, path, achievement_blings=True):
         ]
     # 8.
     patches += [
-        (SKU_PRICE, '<span class="currency-value">{{:~rememberPrice(SkuCode, '
-                    'CurrencyAmount.Amount)}}</span>', "alle"),
-        (CONFIRM_PRICE, '<span class="amount">{{:~rememberedPrice('
-                        'ShopProduct.Skus[ShopProduct.Skus.length-1].SkuCode, '
-                        'ShopProduct.Skus[ShopProduct.Skus.length-1].ActualPrice.Amount)}}</span>',
+        (SKU_PRICE, ('<span class="currency-value">{{:~rememberPrice(SkuCode, '
+                     'CurrencyAmount.Amount)}}</span>'), "alle"),
+        (CONFIRM_PRICE, ('<span class="amount">{{:~rememberedPrice('
+                         'ShopProduct.Skus[ShopProduct.Skus.length-1].SkuCode, '
+                         'ShopProduct.Skus[ShopProduct.Skus.length-1].ActualPrice.Amount)}}</span>'),
          "alle"),
     ]
     # 10.
@@ -201,8 +201,8 @@ STATIC_FILES = [
          REMEMBER_PRICE + ACHIEVEMENT_HELPER + '$.views.helpers("enumValueCompare",')]),
     # 6.
     ("Js/modules/profile/playerInteractionModule.js", [
-        ('"&attackType="+getEnumName(this._playerInteractionModel.AttackType,'
-         '"hyperquest.enums.AttackType")',
+        (('"&attackType="+getEnumName(this._playerInteractionModel.AttackType,'
+          '"hyperquest.enums.AttackType")'),
          '"&attackType=None"')]),
     # 5.
     # 5.
@@ -216,8 +216,8 @@ def files(game_data, blings=None):
     None = Bling-Wirtschaft aus (9. entfällt)."""
     ui = game_data / "Data/UI"
     helper = "" if blings is None else (
-        '$.views.helpers("achievementBlings",function(i){var m=%s;'
-        'return m[i]||0});' % blings)
+        f'$.views.helpers("achievementBlings",function(i){{var m={blings};'
+        'return m[i]||0});')
     static = [(path, [(old, new.replace(ACHIEVEMENT_HELPER, helper)) + tuple(rest)
                       for old, new, *rest in patches])
               for path, patches in STATIC_FILES]

@@ -136,8 +136,8 @@ def boot_tsc(group):
         src = f.read()
     line = 'AddEnableGroup "OrdinaryDay"'
     if src.count(line) != 1:
-        raise RuntimeError("Boot.tsc: Zeile %s nicht gefunden" % line)
-    return src.replace(line, 'AddEnableGroup "%s"' % group).encode("latin-1")
+        raise RuntimeError(f"Boot.tsc: Zeile {line} nicht gefunden")
+    return src.replace(line, f'AddEnableGroup "{group}"').encode("latin-1")
 
 
 def _seven_zip():
@@ -236,7 +236,7 @@ class Package:
         return self.rm_type, self.name
 
     def patch_name(self, installed):
-        return "%d%s_%s_%s.7z" % (self.rm_type, self.name, installed, self.version)
+        return f"{self.rm_type:d}{self.name}_{installed}_{self.version}.7z"
 
     def patch(self, installed):
         """Archiv mit <Pfad>.xdelta je Datei (Launcher: TaskApplyGamePatches
@@ -244,6 +244,8 @@ class Package:
         key = self.key + (installed, self.version)
         if key not in _PATCHES:
             old, new = self.installed_files(installed), self.files(self.version)
+            if old is None or new is None:  # Aufrufer prüfen vorher; nie raten
+                raise ValueError(f"kein Patch möglich: {self.key} {installed} -> {self.version}")
             if self.replace:
                 files = tuple((path + ".replace", data) for path, data in sorted(new.items())
                               if old.get(path) != data)
@@ -279,7 +281,7 @@ def _ui_version():
     crc = 0
     for path, data in sorted(ui_patches.patched(GAME_DATA).items()):
         crc = zlib.crc32(data, zlib.crc32(path.encode(), crc))
-    return "%s.U%08x" % (GAME_VERSION, crc)
+    return f"{GAME_VERSION}.U{crc:08x}"
 
 
 def _game_ui_files(version):
@@ -302,7 +304,7 @@ def _game_ui_files(version):
 def _game_version():
     if not CLIENT_EXE:
         return GAME_VERSION
-    return "%s.X%08x" % (GAME_VERSION, zlib.crc32(_read(CLIENT_EXE)))
+    return f"{GAME_VERSION}.X{zlib.crc32(_read(CLIENT_EXE)):08x}"
 
 
 def crc_list(path, files):
@@ -313,10 +315,12 @@ def crc_list(path, files):
         entry = json.dumps(name.replace("/", "\\")).encode()
         pattern = re.compile(rb'("InstallationRelativePath":' + re.escape(entry)
                              + rb',\s*"FileCRCInfo":\{\s*"CRC":)\d+(,\s*"FileSize":)\d+')
-        text, n = pattern.subn(lambda m: b"%s%d%s%d" % (m.group(1), zlib.crc32(data),
-                                                        m.group(2), len(data)), text)
+        crc, size = zlib.crc32(data), len(data)
+        text, n = pattern.subn(
+            lambda m, crc=crc, size=size: b"%s%d%s%d" % (m.group(1), crc, m.group(2), size),
+            text)
         if n != 1:
-            raise ValueError("%s: %s %d-mal statt einmal" % (path, name, n))
+            raise ValueError(f"{path}: {name} {n:d}-mal statt einmal")
     return text
 
 
@@ -412,7 +416,7 @@ def settings2(group, trial_id=None):
 def _trial_version(trial):
     """Versionsteil eines Trials: T<Event-Id> (free_trials.event_id, nur
     Ziffern wie die übrigen Versionsnamen)."""
-    return "T%d" % trial["Id"]
+    return f"T{trial['Id']:d}"
 
 
 def _version_parts(version):
@@ -444,7 +448,8 @@ def _community_event_files(version):
     parts = _version_parts(version)
     if parts is None:
         return None
-    return {SETTINGS2: settings2(parts[0], parts[1] and parts[1]["Id"])}
+    group, trial, _crc = parts
+    return {SETTINGS2: settings2(group, trial["Id"] if trial else None)}
 
 
 def packages(today, forced_event=None):
@@ -468,7 +473,7 @@ def packages(today, forced_event=None):
 
 
 def T(name):
-    return "DistributionService.Contracts.%s, DistributionService.Contracts" % name
+    return f"DistributionService.Contracts.{name}, DistributionService.Contracts"
 
 
 def _version(pkg, machine):
@@ -497,13 +502,13 @@ def launcher_patch():
             "VersionName": LAUNCHER_VERSION}
 
 
-def server_packages(client, base_url, today, machine=1, forced_event=None):
+def server_packages(client, base_url, today, machine: int | str = 1, forced_event=None):
     """RMServerPackagesVersion (GetRMPackagesVersion)."""
     return launcher_and_packages(client, base_url, today, machine,
                                  forced_event)["RMServerPackagesVersion"]
 
 
-def launcher_and_packages(client, base_url, today, machine=1, forced_event=None):
+def launcher_and_packages(client, base_url, today, machine: int | str = 1, forced_event=None):
     """RMLauncherAndServerPackagesVersion: Launcher aktuell; je Paket
     aktuell, nur Versionsnummer eintragen (Dateien schon richtig) oder
     Patch (Delta zur installierten Version)."""
@@ -523,8 +528,7 @@ def launcher_and_packages(client, base_url, today, machine=1, forced_event=None)
             else:
                 patch.update(RMPackagePatchFlags=CAN_INSTALL_PATCH,
                              PatchDownloadSize=len(pkg.patch(installed)),
-                             PatchInstallUrl="%s/files/%s" % (
-                                 base_url, pkg.patch_name(installed)))
+                             PatchInstallUrl=f"{base_url}/files/{pkg.patch_name(installed)}")
         patches.append(patch)
     return {"$type": T("RMLauncherAndServerPackagesVersion"),
             "RMLauncherPatch": launcher_patch(),
@@ -536,8 +540,8 @@ def launcher_and_packages(client, base_url, today, machine=1, forced_event=None)
 def archive_by_name(file_name, today, forced_event=None):
     """Patch-Archiv <Typ><Name>_<von>_<nach>.7z."""
     for pkg in packages(today, forced_event):
-        prefix = "%d%s_" % pkg.key
-        suffix = "_%s.7z" % pkg.version
+        prefix = f"{pkg.rm_type:d}{pkg.name}_"
+        suffix = f"_{pkg.version}.7z"
         if file_name.startswith(prefix) and file_name.endswith(suffix):
             installed = file_name[len(prefix):-len(suffix)]
             if pkg.installed_files(installed) is not None:
@@ -603,8 +607,8 @@ _TEXTS = {
            "This account is banned.", "This account is suspended until {0}.",
            "Too many failed attempts, please wait a minute.",
            "Server maintenance, please try again later.",
-           "Steam account recognised. New here? Play with your Steam account. "
-           "Already have an account? Log in below once to link it.",
+           ("Steam account recognised. New here? Play with your Steam account. "
+            "Already have an account? Log in below once to link it."),
            "Play as new Steam player", "Steam check expired, please restart the launcher.",
            "This Steam account is already linked to another account.",
            "This account is already linked to another Steam account."),
@@ -615,10 +619,10 @@ _TEXTS = {
            "Der Name ist schon vergeben.", "Name oder Passwort falsch.",
            "Passwort zu kurz (mindestens 6 Zeichen).",
            "Dieser Account ist gebannt.", "Dieser Account ist gesperrt bis {0}.",
-       "Zu viele Fehlversuche, bitte eine Minute warten.",
+           "Zu viele Fehlversuche, bitte eine Minute warten.",
            "Serverwartung, bitte später erneut versuchen.",
-           "Steam-Konto erkannt. Neu hier? Spiele mit deinem Steam-Konto. "
-           "Schon einen Account? Melde dich unten einmal an, um ihn zu verknüpfen.",
+           ("Steam-Konto erkannt. Neu hier? Spiele mit deinem Steam-Konto. "
+            "Schon einen Account? Melde dich unten einmal an, um ihn zu verknüpfen."),
            "Als neuer Steam-Spieler spielen", "Steam-Prüfung abgelaufen, bitte den Launcher neu starten.",
            "Dieses Steam-Konto ist schon mit einem anderen Account verknüpft.",
            "Dieser Account ist schon mit einem anderen Steam-Konto verknüpft."),

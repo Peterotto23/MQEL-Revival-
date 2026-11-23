@@ -11,8 +11,8 @@ import datetime
 import functools
 import glob
 import json
-import random
 import os
+import random
 
 import balance
 import loot
@@ -43,13 +43,13 @@ _NAME_B = ["Bob", "Greta", "Knuckles", "Barnaby", "Hilda", "Rupert", "Mog",
 
 
 def T(name):
-    return "%s.%s, %s" % (CONTRACTS, name, CONTRACTS)
+    return f"{CONTRACTS}.{name}, {CONTRACTS}"
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def building_ranks(spec_id):
     """Rang-Specs eines Gebäudes (Buildings/<spec>/Gameplay.json, "Ranks")."""
-    path = glob.glob(os.path.join(loot.SETTINGS, "Buildings", "%06d - *" % spec_id,
+    path = glob.glob(os.path.join(loot.SETTINGS, "Buildings", f"{spec_id:06d} - *",
                                   "Gameplay.json"))
     if not path:
         return []
@@ -71,7 +71,7 @@ def building_ranks(spec_id):
 
 def _spec_value(folder, spec_id, key):
     """Erster Wert von `key` in <folder>/<spec>/Gameplay.json (None: fehlt)."""
-    path = glob.glob(os.path.join(loot.SETTINGS, folder, "%06d - *" % spec_id,
+    path = glob.glob(os.path.join(loot.SETTINGS, folder, f"{spec_id:06d} - *",
                                   "Gameplay.json"))
     if not path:
         return None
@@ -91,13 +91,13 @@ def _spec_value(folder, spec_id, key):
         return find(json.load(f))
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def construction_points(folder, spec_id):
     """ConstructionPoints einer Kreatur/Falle/Deko (<folder>/<spec>/Gameplay.json)."""
     return _spec_value(folder, spec_id, "ConstructionPoints") or 0
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def is_rare(folder, spec_id):
     """Seltene Kreatur/Falle (BuildableSpec.IsRare: Limited Edition, Halloween)."""
     return bool(_spec_value(folder, spec_id, "IsRare"))
@@ -134,7 +134,7 @@ def rare_ratio(c):
 def boost_spec(boost_id):
     """DefenseIngredientBoostSpec (BoostTarget, Duration)."""
     path = glob.glob(os.path.join(loot.SETTINGS, "DefenseIngredientBoost",
-                                  "%06d - *" % boost_id, "Gameplay.json"))[0]
+                                  f"{boost_id:06d} - *", "Gameplay.json"))[0]
     with open(path, encoding="utf-8") as f:
         return json.load(f)[0]
 
@@ -151,11 +151,11 @@ def duration(text):
     return total + int(num or 0)
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def building_instances(spec_id):
     """Je erlaubter Instanz eines Gebäudes die nötige Burgherz-Stufe
     (BuildingInstanceRequirements, z. B. Bling-Mine [2, 2, 2]); [] ohne Datei."""
-    path = glob.glob(os.path.join(loot.SETTINGS, "Buildings", "%06d - *" % spec_id,
+    path = glob.glob(os.path.join(loot.SETTINGS, "Buildings", f"{spec_id:06d} - *",
                                   "Gameplay.json"))
     if not path:
         return []
@@ -292,7 +292,7 @@ THRONES = (25, 26, 27, 7046)
 GALLERY_ROOMS = 4  # Gänge zwischen Eingang und Thronsaal
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _room_sections():
     out = {}
     for path in glob.glob(os.path.join(ROOMS, "*", "Gameplay.json")):
@@ -317,10 +317,12 @@ def _is_linear(spec):
 
 def _orientation(r):
     o = r.get("Orientation") or 0
-    return _ORIENTATION.get(o, o) % 4
+    if isinstance(o, str):  # Name ("Front"...) statt Zahl
+        o = _ORIENTATION[o]
+    return o % 4
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _room_pool():
     """Räume der PVE-Burgen mit Ausrichtung 0 samt Inhalt, je Art:
     [(Burg-Level, Burg-Id, Raum)]. Nur ungedrehte Räume: in gedrehten
@@ -340,14 +342,14 @@ def _room_pool():
     return pool
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _required_rank(kind, spec):
     """BuildingRequirementSpec-Rang (Architektenbüro o. ä.) einer Spec, 0
     ohne Voraussetzung. Spielerburgen prüfen ihn beim Laden ("Cannot snap
     loaded buildable entity": Gang 2006 verlangt Rang 5 und fiel in einer
     Level-3-Burg heraus, Gänge mit Rang 2 luden)."""
     path = glob.glob(os.path.join(os.path.dirname(CASTLES), kind,
-                                  "%06d - *" % spec, "Gameplay.json"))
+                                  f"{spec:06d} - *", "Gameplay.json"))
     if not path:
         return 0
     with open(path[0], encoding="utf-8") as f:
@@ -368,14 +370,14 @@ FAKE_CREATURES_PER_ROOM = 1
 _REFS = ("PowerSupplyCastleBuildableId", "TotemCastleBuildableId")
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _player_buildable(kind, spec):
     """Spec im Baumodus verfügbar (IsAvailableInBuildMode)? PVE-Burgen
     enthalten Level-Design-Objekte (z. B. Trap 77 LD_FloorLoot_Gold), die
     sich in Spielerburgen nicht setzen lassen ("Cannot snap loaded
     buildable entity to the room grid" -> Raum fehlt -> Burg ungültig)."""
     path = glob.glob(os.path.join(os.path.dirname(CASTLES), kind,
-                                  "%06d - *" % spec, "Gameplay.json"))
+                                  f"{spec:06d} - *", "Gameplay.json"))
     if not path:
         return False
     with open(path[0], encoding="utf-8") as f:
@@ -458,8 +460,8 @@ def _fake_player(c):
          if k not in ("OasisName", "OasisNameId", "OasisDescription",
                       "CustomAttackerReward", "IsTutorialCastle")}
     f["AccountId"] = FAKE_PLAYER_BASE + src
-    f["AccountDisplayName"] = "%s%s" % (_NAME_A[src % len(_NAME_A)],
-                                        _NAME_B[src * 7 % len(_NAME_B)])
+    f["AccountDisplayName"] = (f"{_NAME_A[src % len(_NAME_A)]}"
+                               f"{_NAME_B[src * 7 % len(_NAME_B)]}")
     f["_CastleType"] = CASTLE_TYPE_USER
     f["CountryCode"] = _COUNTRIES[src * 5 % len(_COUNTRIES)]
     f["LayoutId"] = 1  # einziges Spielerburg-Raster (CastleLayouts, 10x10)
@@ -508,7 +510,7 @@ def shield_due(account, now=None):
     """DueDate des aktiven Burgschilds (ShieldEndExpirable, verwiesen von
     BuildInfo.ShieldEndExpirableId) oder None."""
     eid = (account.get("BuildInfo") or {}).get("ShieldEndExpirableId")
-    stamp = (now or datetime.datetime.now(datetime.timezone.utc)).strftime(
+    stamp = (now or datetime.datetime.now(datetime.UTC)).strftime(
         "%Y-%m-%dT%H:%M:%SZ")
     return next((e["DueDate"] for e in account.get("Expirables") or []
                  if e["Id"] == eid and e.get("ExpirableType") == "ShieldEnd"
@@ -520,7 +522,7 @@ def _mine_statuses(account, rooms):
     _Shielded (Minenschild läuft) und _HourlyProduction (Ertrag in
     AttackSettings.MinePeriodStealableAmountInSeconds, Vorgabe des Originals
     3600 s, nach dem Rang im übergebenen Burgstand)."""
-    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    stamp = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     active = {e["Id"] for e in account.get("Expirables") or []
               if e.get("ExpirableType") == "MineShield" and e["DueDate"] > stamp}
     period = loot.attack_settings().get("MinePeriodStealableAmountInSeconds", 3600)
@@ -613,6 +615,8 @@ def validation_castle(account, viewer_id, may_validate):
             or not may_validate(account["AccountId"], d["Guild"])):
         return None
     c = player_castle(account, rooms=d["Rooms"])
+    if c is None:  # Ticket ohne Räume
+        return None
     c.update(_MineStatuses=copy.deepcopy(d["MineStatuses"]),
              _ValidationRegion=d["Region"], _ValidationGuild=d["Guild"])
     return c
@@ -645,7 +649,7 @@ def _fresh_snapshot(p):
     sähe ein Angreifer das Paket vom letzten Besuch des Besitzers (nach
     einer Woche Abwesenheit leer statt Stufe 6). Die Meldungen gehen in
     die Warteschlange des Besitzers."""
-    for name, fields in p.state.material_mines(datetime.datetime.now(datetime.timezone.utc)):
+    for name, fields in p.state.material_mines(datetime.datetime.now(datetime.UTC)):
         p.notifications.push(name, fields)
     return p.state.snapshot()
 
@@ -736,7 +740,7 @@ def _user_summary(c):
 ASSIGNMENTS = os.path.join(os.path.dirname(CASTLES), "Assignments")
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _hidden_by_assignment():
     """{AssignmentId: [Burg-Ids]} aus HideAttackSelectionCastles-Aktionen
     (z. B. 150 blendet die Tutorial-Burgen 2, 3 und 71 aus)."""
@@ -751,7 +755,7 @@ def _hidden_by_assignment():
     return out
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def attack_regions():
     """{AttackRegionId: Region} aus AttackAdvisorSettings."""
     with open(os.path.join(loot.SETTINGS, "GeneralSettings",
@@ -870,7 +874,7 @@ def _oasis_name(c):
         c["OasisNameId"] = c["OasisName"]
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _castle_paths():
     """{AccountId: Pfad}; Dateinummer und AccountId stimmen nicht immer
     überein (z. B. 000004 - PVE_01_Shamblington)."""

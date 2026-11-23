@@ -1,15 +1,15 @@
-"""Stellschrauben der Bling-Wirtschaft (docs/70-bling-wirtschaft.md), im
-Webtool bearbeitbar (Seite Economy, admin.Get/SetBalance).
+"""Tuning knobs of the bling economy (docs/70-bling-wirtschaft.md), editable
+in the web tool (Economy page, admin.Get/SetBalance).
 
-Gespeichert in state/<Profil>/balance.json. "Enabled" schaltet die neuen
-Regeln; aus = Originalregeln, alle Werte bleiben gespeichert.
+Stored in state/<profile>/balance.json. "Enabled" switches the new rules on;
+off = original rules, all values stay stored.
 
-Jedes Feld hat eine Art (FIELDS): "server" wirkt nur im Server; "data"
-zeigt auch der Client und kommt per Patcher in settings.bin (DataBin-Version
-bekommt den Teil B<CRC> dieser Werte; jeder Stand bleibt in "History",
-damit der Patcher auch von älteren Ständen aus Deltas bauen kann, und beim
-Ausschalten zurück zum Original); "ui" kommt per UI-Patch (GameUI-Paket,
-z. B. Achievement-Blings im Popup).
+Every field has a kind (FIELDS): "server" only affects the server; "data" is
+also shown by the client and reaches settings.bin through the patcher (the
+DataBin version gets the part B<CRC> of these values; every state stays in
+"History" so the patcher can also build deltas from older states, and when
+switched off it goes back to the original); "ui" arrives via UI patch
+(GameUI package, e.g. achievement blings in the popup).
 """
 
 import copy
@@ -19,46 +19,58 @@ import os
 import re
 import threading
 import zlib
+from typing import Any
 
 import settings_archive
 
 SETTINGS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         "client", "GameData", "Data", "GameplaySettings")
 BLING_MINE = 16
-BLING_MINE_SKU = "15522"  # Shop-SKU der Bling-Mine (Original 999 Blings)
-ACHIEVEMENT_BLINGS_PER_POINT = 2  # Vorgabe: Punkte x 2 (zusammen ~1500)
-# Vorgaben für Objective-Blings (Original 50): Bosse und Heist höher, zusammen
-# 1550 statt 550 (ersetzt die gestrichenen Meilensteine)
-OBJECTIVE_BLINGS = {5: 200, 100: 200, 101: 200, 99: 200, 103: 200, 102: 200,
-                    104: 200, 304: 150}
+BLING_MINE_SKU = "15522"  # shop SKU of the bling mine (original 999 blings)
+ACHIEVEMENT_BLINGS_PER_POINT = 2  # default: points x 2 (about 1500 in total)
+# Defaults for objective blings (original 50): the seven region bosses pay
+# 50, 100, ... 350 in ascending order (+50 per region), Heist Part 2 pays 150;
+# 1550 in total instead of 550 (replaces the removed milestones)
+# Region order: Snottingham (1-4), Flameo/Firesly (5-9), Durrrr (10-14),
+# Clubbage (15-19), Marleybone (20-24), Stabbington (25-29),
+# Dragonificus (30-34)
+OBJECTIVE_BLINGS = {5: 50, 100: 100, 101: 150, 99: 200, 103: 250, 102: 300,
+                    104: 350, 304: 150}
+# Repeatable boss raids: castle id (AttackAdvisorSettings BossCastleId) ->
+# (boss, default blings per clear). Same order as the objectives above, +10
+# per region; paid on top of the one-time quest reward (loot.boss_bounty).
+BOSS_CASTLES = {14: ("Count Snottingham", 10), 15: ("Mr. Firesly", 20),
+                16: ("Durrrr", 30), 17: ("Captain Clubbage", 40),
+                18: ("Lord Marleybone", 50), 19: ("Duke of Stabbington", 60),
+                20: ("Dragonificus Terribilus", 70)}
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def achievements():
-    """[(Id, DebugName, Punkte)] aus AchievementSettings."""
+    """[(Id, DebugName, points)] from AchievementSettings."""
     with open(os.path.join(SETTINGS, "GeneralSettings", "AchievementSettings.json"),
               encoding="utf-8-sig") as f:
         return [(a["Id"], a["DebugName"], a["Points"]) for a in json.load(f)["Achievements"]]
 
 
-# Bling-Shop: Packs (SpecialPackSettings) und Preise, entschieden in
-# docs/analysis/special-packs.md; 67 nur während Halloween (bling_shop)
+# Bling shop: packs (SpecialPackSettings) and prices, decided in
+# docs/analysis/special-packs.md; 67 only during Halloween (bling_shop)
 SHOP_PACKS = {1: 1000, 2: 1500, 3: 1500, 4: 1500, 5: 1500, 7: 1500, 8: 1500,
               14: 1500, 15: 300, 26: 800, 27: 800, 28: 800, 45: 1500, 47: 2500,
               49: 300, 50: 1500, 51: 800, 66: 4000, 67: 1500, 69: 300, 71: 1500,
               72: 4000, 74: 2500, 75: 2500}
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def pack_names():
     with open(os.path.join(SETTINGS, "GeneralSettings", "SpecialPackSettings.json"),
               encoding="utf-8-sig") as f:
         return {p["Id"]: p["DebugName"] for p in json.load(f)["SpecialPacks"]}
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def objectives():
-    """[(Id, DebugName, Original-Blings)] der Objectives mit Bling-Belohnung."""
+    """[(Id, DebugName, original blings)] of the objectives with a bling reward."""
     with open(os.path.join(SETTINGS, "GeneralSettings", "ObjectiveSettings.json"),
               encoding="utf-8-sig") as f:
         out = []
@@ -70,57 +82,81 @@ def objectives():
         return out
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def fields():
-    """{(Bereich, Schlüssel): {Default, Min, Max, Kind, Label, Help}}."""
+    """{(section, key): {Default, Min, Max, Kind, Label, Help}}."""
     out = {
-        # Bling-Mine (Gebäude 16): 1 Bling je ProductionHours Stunden,
-        # Speicher Capacity; plünderbar höchstens StealHours Stunden
-        # Produktion (mindestens 1, wie PremiumCashMineLossAmount)
-        ("Mine", "ProductionHours"): dict(Default=4, Min=1, Max=24, Kind="data",
-                                          Label="Hours per bling", Help="Original: 1"),
-        ("Mine", "Capacity"): dict(Default=42, Min=1, Max=1000, Kind="data",
-                                   Label="Capacity", Help="Original: 25"),
-        ("Mine", "Price"): dict(Default=500, Min=0, Max=5000, Kind="data",
-                                Label="Price (blings)", Help="Shop price of a mine. Original: 999"),
-        ("Mine", "StealHours"): dict(Default=1, Min=0, Max=168, Kind="server",
-                                     Label="Lootable hours of production",
-                                     Help="At least 1 bling; 0 = not lootable. Original: whole content"),
-        # Seltene Bling-Beute: mit Chance trägt eine Kreatur Amount Blings;
-        # höchstens WeeklyCap aus Beute in den letzten 7 Tagen (gleitend)
-        ("Loot", "Chance"): dict(Default=40, Min=0, Max=100, Kind="server",
-                                 Label="Chance per attack (%)",
-                                 Help="Real attacks only (no practice, tutorial, competition)"),
-        ("Loot", "Amount"): dict(Default=10, Min=1, Max=500, Kind="server",
-                                 Label="Blings per drop", Help="Carried by one random creature"),
-        ("Loot", "WeeklyCap"): dict(Default=600, Min=0, Max=10000, Kind="server",
-                                    Label="Cap per 7 days", Help="Rolling window, not a fixed week"),
-        # Liga (SeasonalCompetitionSettings) und Wettbewerbe
-        # (UbisoftCompetitionSettings): alle Bling-Beträge mal Prozent
-        ("Leagues", "BlingPercent"): dict(Default=200, Min=0, Max=1000, Kind="data",
-                                          Label="League blings (%)",
-                                          Help="All bling rewards of leagues. Original: 100"),
-        ("Competitions", "BlingPercent"): dict(Default=200, Min=0, Max=1000, Kind="data",
-                                               Label="Competition blings (%)",
-                                               Help="Top 3 of a competition. Original: 100 (25/10/5)"),
+        # Bling mine (building 16): 1 bling per ProductionHours hours,
+        # storage Capacity; lootable for at most StealHours hours of
+        # production (at least 1, like PremiumCashMineLossAmount)
+        ("Mine", "ProductionHours"): {
+            "Default": 4, "Min": 1, "Max": 24, "Kind": "data",
+            "Label": "Hours per bling", "Help": "Original: 1"},
+        ("Mine", "Capacity"): {
+            "Default": 42, "Min": 1, "Max": 1000, "Kind": "data",
+            "Label": "Capacity", "Help": "Original: 25"},
+        ("Mine", "Price"): {
+            "Default": 500, "Min": 0, "Max": 5000, "Kind": "data",
+            "Label": "Price (blings)", "Help": "Shop price of a mine. Original: 999"},
+        ("Mine", "StealHours"): {
+            "Default": 1, "Min": 0, "Max": 168, "Kind": "server",
+            "Label": "Lootable hours of production",
+            "Help": "At least 1 bling; 0 = not lootable. Original: whole content"},
+        # Rare bling loot: with some chance a creature carries Amount blings;
+        # at most WeeklyCap from loot in the last 7 days (rolling);
+        # WeeklyCap 0 = unlimited
+        ("Loot", "Chance"): {
+            "Default": 40, "Min": 0, "Max": 100, "Kind": "server",
+            "Label": "Chance per attack (%)",
+            "Help": "Real attacks only (no practice, tutorial, competition)"},
+        ("Loot", "Amount"): {
+            "Default": 10, "Min": 1, "Max": 500, "Kind": "server",
+            "Label": "Blings per drop", "Help": "Carried by one random creature"},
+        ("Loot", "WeeklyCap"): {
+            "Default": 0, "Min": 0, "Max": 1000000, "Kind": "server",
+            "Label": "Cap per 7 days (0 = unlimited)",
+            "Help": "Rolling window, not a fixed week. 0 removes the limit"},
+        # Boss raids: every win in a region's boss dungeon pays the boss's
+        # amount (repeatable, unlike the one-time quest); at most WeeklyCap
+        # from boss raids in the last 7 days (rolling), 0 = unlimited
+        **{("Boss", str(cid)): {
+            "Default": amount, "Min": 0, "Max": 5000, "Kind": "server",
+            "Label": name,
+            "Help": "Paid on every win (treasure room reached), 0 = nothing"}
+           for cid, (name, amount) in BOSS_CASTLES.items()},
+        ("Boss", "WeeklyCap"): {
+            "Default": 0, "Min": 0, "Max": 1000000, "Kind": "server",
+            "Label": "Cap per 7 days (0 = unlimited)",
+            "Help": "All boss raids together; rolling window, not a fixed week"},
+        # League (SeasonalCompetitionSettings) and competitions
+        # (UbisoftCompetitionSettings): all bling amounts times a percentage
+        ("Leagues", "BlingPercent"): {
+            "Default": 200, "Min": 0, "Max": 1000, "Kind": "data",
+            "Label": "League blings (%)",
+            "Help": "All bling rewards of leagues. Original: 100"},
+        ("Competitions", "BlingPercent"): {
+            "Default": 200, "Min": 0, "Max": 1000, "Kind": "data",
+            "Label": "Competition blings (%)",
+            "Help": "Top 3 of a competition. Original: 100 (25/10/5)"},
     }
     for pid, price in SHOP_PACKS.items():
-        out[("Shop", str(pid))] = dict(
-            Default=price, Min=0, Max=20000, Kind="server", Label=pack_names()[pid],
-            Help="Pack %d; 0 = not offered" % pid + (", Halloween only" if pid == 67 else ""))
+        out[("Shop", str(pid))] = {
+            "Default": price, "Min": 0, "Max": 20000, "Kind": "server",
+            "Label": pack_names()[pid],
+            "Help": f"Pack {pid}; 0 = not offered" + (", Halloween only" if pid == 67 else "")}
     for oid, name, amount in objectives():
-        out[("Objectives", str(oid))] = dict(
-            Default=OBJECTIVE_BLINGS.get(oid, amount), Min=0, Max=5000, Kind="data",
-            Label=name, Help="Original: %d" % amount)
+        out[("Objectives", str(oid))] = {
+            "Default": OBJECTIVE_BLINGS.get(oid, amount), "Min": 0, "Max": 5000,
+            "Kind": "data", "Label": name, "Help": f"Original: {amount}"}
     for aid, name, points in achievements():
-        out[("Achievements", str(aid))] = dict(
-            Default=points * ACHIEVEMENT_BLINGS_PER_POINT, Min=0, Max=5000, Kind="ui",
-            Label=name, Help="%d points" % points)
+        out[("Achievements", str(aid))] = {
+            "Default": points * ACHIEVEMENT_BLINGS_PER_POINT, "Min": 0, "Max": 5000,
+            "Kind": "ui", "Label": name, "Help": f"{points} points"}
     return out
 
 
-def defaults():
-    values = {"Enabled": False}
+def defaults() -> dict[str, Any]:
+    values: dict[str, Any] = {"Enabled": False}
     for (section, key), f in fields().items():
         values.setdefault(section, {})[key] = f["Default"]
     return values
@@ -132,7 +168,7 @@ _data = {"Values": defaults(), "History": {}, "Changed": None}
 
 
 def load(path):
-    """Stand aus path (fehlt: Vorgaben); unbekannte Schlüssel fallen weg."""
+    """State from path (missing: defaults); unknown keys are dropped."""
     global _path, _data
     _path = path
     values, history, changed = defaults(), {}, None
@@ -153,7 +189,7 @@ def enabled():
 
 
 def get(section, key):
-    """Eingestellter Wert (wirkt nur bei enabled())."""
+    """Configured value (only takes effect when enabled())."""
     return _data["Values"][section][key]
 
 
@@ -169,8 +205,8 @@ def summary():
 
 
 def update(new, now):
-    """Neue Werte übernehmen (nur bekannte Felder, Grenzen geprüft);
-    ValueError mit Text bei ungültigen Werten."""
+    """Apply new values (known fields only, limits checked);
+    ValueError with a message for invalid values."""
     with _lock:
         values = copy.deepcopy(_data["Values"])
         if "Enabled" in new:
@@ -180,10 +216,10 @@ def update(new, now):
             if v is None:
                 continue
             if isinstance(v, bool) or not isinstance(v, (int, float)) or v != int(v):
-                raise ValueError("%s %s must be a whole number" % (section, f["Label"]))
+                raise ValueError(f"{section} {f['Label']} must be a whole number")
             if not f["Min"] <= v <= f["Max"]:
-                raise ValueError("%s %s must be between %d and %d"
-                                 % (section, f["Label"], f["Min"], f["Max"]))
+                raise ValueError(
+                    f"{section} {f['Label']} must be between {f['Min']} and {f['Max']}")
             values[section][key] = int(v)
         _data["Values"] = values
         _data["Changed"] = now
@@ -199,35 +235,36 @@ def update(new, now):
         return _summary()
 
 
-# --- Client-Daten: settings.bin (Patcher, DataBin) ----------------------------
+# --- Client data: settings.bin (patcher, DataBin) -----------------------------
 
 def _data_values(values):
-    """Werte der Art "data" oder None (aus = Original)."""
+    """Values of kind "data", or None (off = original)."""
     if not values["Enabled"]:
         return None
-    out = {"%s.%s" % k: values[k[0]][k[1]] for k, f in fields().items() if f["Kind"] == "data"}
+    out = {f"{section}.{key}": values[section][key]
+           for (section, key), f in fields().items() if f["Kind"] == "data"}
     out["Revision"] = DATA_REVISION
     return out
 
 
-# Feste Daten-Änderungen bei Enabled; erhöhen ändert die DataBin-Version.
-# 2: Special Packs ohne EarlyHeroAccess (Helden nur für Blings)
+# Fixed data changes while enabled; raising it changes the DataBin version.
+# 2: special packs without EarlyHeroAccess (heroes only for blings)
 DATA_REVISION = 2
 
 
 def _crc(cv):
-    return "%08x" % zlib.crc32(json.dumps(cv, sort_keys=True).encode())
+    return f"{zlib.crc32(json.dumps(cv, sort_keys=True).encode()):08x}"
 
 
 def client_version():
-    """Versionsteil "B<CRC>" der aktiven data-Werte, "" ohne."""
+    """Version part "B<CRC>" of the active data values, "" without."""
     cv = _data_values(_data["Values"])
     return "" if cv is None else "B" + _crc(cv)
 
 
 def history(crc):
-    """data-Werte zu einem Versionsteil (ohne "B") oder None. Der aktive
-    Stand zählt immer, auch ungespeichert (z. B. neue Felder mit Vorgabe)."""
+    """Data values for a version part (without "B"), or None. The active
+    state always counts, even unsaved (e.g. new fields with defaults)."""
     cv = _data_values(_data["Values"])
     if cv is not None and _crc(cv) == crc:
         return cv
@@ -240,28 +277,28 @@ OBJECTIVE_FILE = b"GENERALSETTINGS\\OBJECTIVESETTINGS.JSON\x00"
 
 
 def _file_span(content, name):
-    """(Beginn, Ende) des JSON-Texts der Archivdatei name."""
+    """(start, end) of the JSON text of the archive file name."""
     start = content.find(name)
     if start < 0 or content.count(name) != 1:
-        raise RuntimeError("settings.bin: %r nicht eindeutig gefunden" % name)
+        raise RuntimeError(f"settings.bin: {name!r} not found uniquely")
     begin = start + len(name)
     return begin, content.index(b"\x00", begin)
 
 
 def _objective_text(text, cv):
-    """ObjectiveSettings-Text mit den Bling-Beträgen aus cv (ältere Stände
-    in History haben keine: Original)."""
+    """ObjectiveSettings text with the bling amounts from cv (older states
+    in History have none: original)."""
     for oid, _, original in objectives():
         head = re.compile(rb'"Id":%d,\s*"DebugName"' % oid)
         heads = list(head.finditer(text))
         if len(heads) != 1:
-            raise RuntimeError("settings.bin: Objective %d nicht eindeutig" % oid)
+            raise RuntimeError(f"settings.bin: objective {oid} not unique")
         amount = re.compile(rb'("CurrencyType":"PremiumCash",\s*"Amount":)(\d+)')
         m = amount.search(text, heads[0].end())
         nxt = text.find(b'"DebugName"', heads[0].end())
         if m is None or (nxt >= 0 and m.start() > nxt):
-            raise RuntimeError("settings.bin: Blings von Objective %d fehlen" % oid)
-        text = (text[:m.start(2)] + b"%d" % cv.get("Objectives.%d" % oid, original)
+            raise RuntimeError(f"settings.bin: blings of objective {oid} missing")
+        text = (text[:m.start(2)] + b"%d" % cv.get(f"Objectives.{oid}", original)
                 + text[m.end(2):])
     return text
 
@@ -278,46 +315,46 @@ def _mine_text(text, cv):
                       b'"ProductionPeriod":"%dh"' % cv["Mine.ProductionHours"]),
                      (b'"Capacity":25,', b'"Capacity":%d,' % cv["Mine.Capacity"])):
         if text.count(old) != 1:
-            raise RuntimeError("settings.bin: %r nicht eindeutig" % old)
+            raise RuntimeError(f"settings.bin: {old!r} not unique")
         text = text.replace(old, new)
     return text
 
 
 def _sku_text(text, cv):
-    """Shop-Preis der Bling-Mine (ältere Stände ohne den Wert: Original)."""
+    """Shop price of the bling mine (older states without the value: original)."""
     if "Mine.Price" not in cv:
         return text
-    sku = re.compile(rb'"Code":"%s",.*?"Amount":(\d+)' % BLING_MINE_SKU.encode(), re.S)
+    sku = re.compile(rb'"Code":"%s",.*?"Amount":(\d+)' % BLING_MINE_SKU.encode(), re.DOTALL)
     m = sku.search(text)
     if m is None or b'"Code"' in text[m.start() + 1:m.start(1)]:
-        raise RuntimeError("settings.bin: Preis der Bling-Mine nicht gefunden")
+        raise RuntimeError("settings.bin: price of the bling mine not found")
     return text[:m.start(1)] + b"%d" % cv["Mine.Price"] + text[m.end(1):]
 
 
 def _percent_text(key):
-    """Bearbeiter: alle Bling-Beträge mal cv[key] Prozent (ältere Stände
-    ohne den Wert: Original)."""
+    """Editor: all bling amounts times cv[key] percent (older states
+    without the value: original)."""
     def edit(text, cv):
         pct = cv.get(key, 100)
         if not BLING_AMOUNT.search(text):
-            raise RuntimeError("settings.bin: keine Blings für %s" % key)
+            raise RuntimeError(f"settings.bin: no blings found for {key}")
         return BLING_AMOUNT.sub(lambda m: m.group(1) + b"%d" % scaled(int(m.group(2)), pct),
                                 text)
     return edit
 
 
 def _pack_text(text, cv):
-    """Special Packs ohne frühen Heldenzugang (ab Revision 2)."""
+    """Special packs without early hero access (from revision 2)."""
     if cv.get("Revision", 1) < 2:
         return text
     if not EARLY_HEROES.search(text):
-        raise RuntimeError("settings.bin: EarlyHeroAccess nicht gefunden")
+        raise RuntimeError("settings.bin: EarlyHeroAccess not found")
     return EARLY_HEROES.sub(b"", text)
 
 
 def settings_bin(original, cv):
-    """settings.bin mit den data-Werten cv (Bling-Mine, Objective-, Liga- und
-    Wettbewerbs-Blings). Neu gepackt wird ab der ersten geänderten Datei."""
+    """settings.bin with the data values cv (bling mine, objective, league and
+    competition blings). Repacked from the first changed file on."""
     content, _, _ = settings_archive.read(original)
     edits = sorted((_file_span(content, name), fn) for name, fn in (
         (MINE_FILE, _mine_text), (SKU_FILE, _sku_text), (OBJECTIVE_FILE, _objective_text),
@@ -333,16 +370,16 @@ def settings_bin(original, cv):
 
 
 def mine_rank(spec_id, spec):
-    """MineBuildingRankSpec der Bling-Mine mit den eingestellten Werten."""
+    """MineBuildingRankSpec of the bling mine with the configured values."""
     if spec is None or spec_id != BLING_MINE or not enabled():
         return spec
-    return dict(spec, ProductionPeriod="%dh" % get("Mine", "ProductionHours"),
+    return dict(spec, ProductionPeriod=f"{get('Mine', 'ProductionHours')}h",
                 ProductionValue=1, Capacity=get("Mine", "Capacity"))
 
 
 def sku_price(sku):
-    """Preis der SKU ({CurrencyType, Amount} oder None), Bling-Mine mit dem
-    eingestellten Preis."""
+    """Price of the SKU ({CurrencyType, Amount} or None), bling mine with the
+    configured price."""
     price = sku.get("Price")
     if sku["Code"] == BLING_MINE_SKU and enabled():
         return dict(price, Amount=get("Mine", "Price"))
@@ -352,14 +389,14 @@ def sku_price(sku):
 # --- Achievements ------------------------------------------------------------
 
 def achievement_blings(achievement_id):
-    """Blings für das Achievement (0, wenn aus)."""
+    """Blings for the achievement (0 when off)."""
     if not enabled():
         return 0
     return _data["Values"]["Achievements"].get(str(achievement_id), 0)
 
 
 def ui_achievement_blings():
-    """{Id: Blings} für den UI-Patch (leer, wenn aus; ohne Nullen)."""
+    """{Id: blings} for the UI patch (empty when off; without zeros)."""
     if not enabled():
         return {}
     return {int(k): v for k, v in _data["Values"]["Achievements"].items() if v}
@@ -368,21 +405,21 @@ def ui_achievement_blings():
 # --- Objectives --------------------------------------------------------------
 
 def objective_blings(objective_id, original):
-    """Blings für das Objective (original, wenn aus oder ohne Feld)."""
+    """Blings for the objective (original when off or without a field)."""
     if not enabled():
         return original
     return _data["Values"].get("Objectives", {}).get(str(objective_id), original)
 
 
-# --- Liga und Wettbewerbe ----------------------------------------------------
+# --- Leagues and competitions ------------------------------------------------
 
 def scaled(amount, percent):
     return int(amount * percent / 100 + 0.5)
 
 
 def scale_reward(reward, section):
-    """Kopie von reward (RewardItems) mit Bling-Beträgen mal
-    section.BlingPercent; unverändert, wenn aus."""
+    """Copy of reward (RewardItems) with bling amounts times
+    section.BlingPercent; unchanged when off."""
     if not reward or not enabled():
         return reward
     pct = get(section, "BlingPercent")
@@ -394,10 +431,10 @@ def scale_reward(reward, section):
     return out
 
 
-# --- Bling-Shop --------------------------------------------------------------
+# --- Bling shop --------------------------------------------------------------
 
 def shop_prices():
-    """{Pack-Id: Blings} der angebotenen Packs (leer, wenn aus)."""
+    """{pack id: blings} of the offered packs (empty when off)."""
     if not enabled():
         return {}
     return {int(k): v for k, v in _data["Values"]["Shop"].items() if v}

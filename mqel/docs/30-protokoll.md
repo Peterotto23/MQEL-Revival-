@@ -1,63 +1,63 @@
-# Protokoll: HTTP + JSON („Argo Services“)
+# Protocol: HTTP + JSON ("Argo Services")
 
-Rekonstruiert aus `Util.Client.dll` (URL-Aufbau, Request-Prozessoren),
-`Util.Server.dll` (Routing, Dispatch, HMAC) und
-`Util.Common.Service.dll` (Attribute). Verifiziert per IL-Disassemblat
+Reconstructed from `Util.Client.dll` (URL construction, request processors),
+`Util.Server.dll` (routing, dispatch, HMAC) and
+`Util.Common.Service.dll` (attributes). Verified via IL disassembly
 (`tools/ildump.py`).
 
-## URL-Schema
+## URL scheme
 
 ```text
-{GameServerUrl}/{ServiceName}/{MethodName}[?param=urlenc(wert)&…]
+{GameServerUrl}/{ServiceName}/{MethodName}[?param=urlenc(value)&…]
 ```
 
-- `GameServerUrl` kommt aus der Launcher-Config bzw. `-server_url`.
-- `ServiceName` = `[Service]`-Attribut, z. B. `AccountService.hqs`
-  (**inkl. `.hqs`-Suffix**, dem Argo-Service-Definitionsfile).
-- `MethodName` = Interface-Methodenname, z. B. `Login`.
-- Client-Aufbau (`ServiceClientFactory` → `UrlBuilder.BuildUrlFormat`):
-  Basis = `GameServerUrl + "/" + ServiceName`, Methode = `"/" + Name +
-  "?p0={0}&p1={1}…"` (Stream-Parameter ausgenommen), Werte via
+- `GameServerUrl` comes from the launcher config or `-server_url`.
+- `ServiceName` = `[Service]` attribute, e.g. `AccountService.hqs`
+  (**including the `.hqs` suffix**, the Argo service definition file).
+- `MethodName` = interface method name, e.g. `Login`.
+- Client construction (`ServiceClientFactory` → `UrlBuilder.BuildUrlFormat`):
+  base = `GameServerUrl + "/" + ServiceName`, method = `"/" + Name +
+  "?p0={0}&p1={1}…"` (stream parameters excluded), values via
   `String.Format` + `UrlEncode(ToString(arg))`.
-- Server-Routing (`ServiceHttpHandler` + `ServiceRequestProcessor`):
-  Komponente `"~/" + ServiceName` (Castle Windsor), darin Map
-  `"/" + MethodName` → Methoden-Prozessor. Unbekannte Pfade →
-  `NotFoundException` (HTTP 404 als JSON-Fehler, siehe unten).
+- Server routing (`ServiceHttpHandler` + `ServiceRequestProcessor`):
+  component `"~/" + ServiceName` (Castle Windsor), inside it a map
+  `"/" + MethodName` → method processor. Unknown paths →
+  `NotFoundException` (HTTP 404 as a JSON error, see below).
 
-Beispiel (GET):
+Example (GET):
 
 ```text
 GET http://server:port/AccountService.hqs/HealthCheck
 GET http://server:port/AttackSelectionService.hqs/GetAttackSelectionList?attackRegionId=3&maxSuggestionCountByLevel=5
 ```
 
-## Methoden-Typen (Attribute in `Util.Common.Service`)
+## Method types (attributes in `Util.Common.Service`)
 
-| Attribut | HTTP | Request | Response |
+| Attribute | HTTP | Request | Response |
 |---|---|---|---|
-| `[JsonGet]` (54× in Game-Contracts) | GET | Query-Params (`Request.Params`: QueryString+Form+Cookies+ServerVars) | `application/json` |
-| `[JsonPost]` (160×) | POST | JSON-Body, s. u. | `application/json` |
-| `[StreamGet]` (2×: `GetReplay`, `GetAttackAntiCheatJob`) | GET | Query-Params | `application/octet-stream` |
-| `[StreamPost]` (1×: `StoreReplay(accountId, replayStream)`) | POST | Query + Binär-Stream (via CallContext) | `application/json` |
-| `[HtmlGet]` (1×: `LinkFacebookAccount`) | GET | — | `text/html` (entfällt im Revival) |
+| `[JsonGet]` (54× in game contracts) | GET | Query params (`Request.Params`: QueryString+Form+Cookies+ServerVars) | `application/json` |
+| `[JsonPost]` (160×) | POST | JSON body, see below | `application/json` |
+| `[StreamGet]` (2×: `GetReplay`, `GetAttackAntiCheatJob`) | GET | Query params | `application/octet-stream` |
+| `[StreamPost]` (1×: `StoreReplay(accountId, replayStream)`) | POST | Query + binary stream (via CallContext) | `application/json` |
+| `[HtmlGet]` (1×: `LinkFacebookAccount`) | GET | — | `text/html` (not needed in the revival) |
 
-- Falsche HTTP-Methode → `NotFoundException`.
-- `[Private]` (auf Typ oder Methode; u. a. `AdminService`,
-  `SleepyGiantService`, `DashboardService` komplett): nur über
-  **Privat-Port + HMAC-Header** (`content-hmac`, `Date`,
-  `content-accesskeyid`, Signatur `GenerateHMACSignature(Url, Methode,
-  Secret)` in `Util.Common.Service.WebRequestHelper`). Öffentlicher
-  Spiel-Traffic braucht das **nicht**.
-- `BodyStyle`-Default = **0 = „bare“**: Responses sind das nackte
-  Ergebnis-JSON (kein Wrapper). `WrappedResponse<T>` (`{"Result":…}` über
-  CallContext-Schlüssel `WRAPPED_RESPONSE`) wird nur bei explizitem
-  `BodyStyle=1` genutzt — im GameServer nicht verwendet.
+- Wrong HTTP method → `NotFoundException`.
+- `[Private]` (on type or method; among others `AdminService`,
+  `SleepyGiantService` and `DashboardService` in their entirety): only via
+  **private port + HMAC headers** (`content-hmac`, `Date`,
+  `content-accesskeyid`, signature `GenerateHMACSignature(Url, Method,
+  Secret)` in `Util.Common.Service.WebRequestHelper`). Public
+  game traffic does **not** need this.
+- `BodyStyle` default = **0 = "bare"**: responses are the bare result JSON
+  (no wrapper). `WrappedResponse<T>` (`{"Result":…}` via the
+  CallContext key `WRAPPED_RESPONSE`) is only used with an explicit
+  `BodyStyle=1` — not used in the GameServer.
 
-## POST-Body
+## POST body
 
-`{"<paramName>": <wert>, …}` — ein Feld pro Methodenparameter
-(`PostHttpBodyContractBuilder`: dynamischer Contract-Typ mit Feldern =
-Parameternamen; Deserialisierung via `Util.Common.Json`):
+`{"<paramName>": <value>, …}` — one field per method parameter
+(`PostHttpBodyContractBuilder`: dynamic contract type with fields =
+parameter names; deserialization via `Util.Common.Json`):
 
 ```text
 POST http://server:port/AccountService.hqs/Login
@@ -66,129 +66,129 @@ Content-Type: application/json
 {"email":"…","password":"…","ipAddress":"…","timeZoneOffset":60}
 ```
 
-Parameter- und Methoden-Namen: `docs/analysis/api-gameserver.txt`
-(generiert mit `tools/apimap.py`, inkl. Parameternamen aus der
-.NET-`Param`-Tabelle).
+Parameter and method names: `docs/analysis/api-gameserver.txt`
+(generated with `tools/apimap.py`, including parameter names from the
+.NET `Param` table).
 
-## GET-Parameter-Typen
+## GET parameter types
 
-`GetHttpMethodCompiler`: `string` roh, sonst `BuildConvertMethodCallExpression`
-(`Parse`-basiert: numerische Typen, `bool`, `Enum`, `DateTime`, `ObjectId`,
-`Nullable<>`; fehlend → `default(T)`). Komplexe DTOs per GET gibt es nicht —
-alle komplexen Calls sind POST.
+`GetHttpMethodCompiler`: `string` raw, otherwise `BuildConvertMethodCallExpression`
+(`Parse`-based: numeric types, `bool`, `Enum`, `DateTime`, `ObjectId`,
+`Nullable<>`; missing → `default(T)`). There are no complex DTOs via GET —
+all complex calls are POST.
 
-## Ambient Header (jedes Request, siehe `40-auth.md`)
+## Ambient headers (every request, see `40-auth.md`)
 
-| Header | Typ | Bedeutung |
+| Header | Type | Meaning |
 |---|---|---|
-| `t` | string | ConnectionToken (Session, s. Auth) |
-| `i` | uint32 | Request-Zähler (Anti-Replay, nur mit `h`) |
-| `h` | uint32 | Client-HMAC (Murmur3, nur wenn Server `EnableClientHmac`) |
-| `rnd` | uint32 | Client-Flags (`& 0xAAAAAAAA` → `ClientHackFlags`, Telemetrie) |
-| `n` | int | (Kontext, Verwendung serverseitig prüfen) |
-| `g` | string | (Kontext, Verwendung serverseitig prüfen) |
+| `t` | string | ConnectionToken (session, see Auth) |
+| `i` | uint32 | Request counter (anti-replay, only with `h`) |
+| `h` | uint32 | Client HMAC (Murmur3, only if the server has `EnableClientHmac`) |
+| `rnd` | uint32 | Client flags (`& 0xAAAAAAAA` → `ClientHackFlags`, telemetry) |
+| `n` | int | (context, check server-side usage) |
+| `g` | string | (context, check server-side usage) |
 
-Server liest sie in `UserStorageLoader.LoadUserInformation` aus
-`Request.Headers` in den CallContext. Sie sind für den Basisbetrieb
-optional (ohne `t` = anonym; ohne `h` = kein HMAC-Check).
+The server reads them in `UserStorageLoader.LoadUserInformation` from
+`Request.Headers` into the CallContext. They are optional for basic
+operation (without `t` = anonymous; without `h` = no HMAC check).
 
-## Dynamisch verifiziert (13.10.2026, Client `0.36.1.34.0` gegen Logging-Server)
+## Dynamically verified (2026-10-13, client `0.36.1.34.0` against a logging server)
 
-- Der Client sendet zusätzlich den Header **`sl: 0`** (sonst nur als
-  Server-Header bekannt) sowie `Accept: */*`.
-- `Content-Type` ist `application/json; charset=utf-8`.
-- Der Request-Zähler `i` beginnt bei **0** und steigt strikt (`0, 1, …`);
-  `h` wird immer mitgesendet (Server ignoriert beides vorerst).
-- POST-Bodys nutzen **Newtonsoft-`$type`-Polymorphie**:
+- The client additionally sends the header **`sl: 0`** (otherwise known only
+  as a server header) as well as `Accept: */*`.
+- `Content-Type` is `application/json; charset=utf-8`.
+- The request counter `i` starts at **0** and rises strictly (`0, 1, …`);
+  `h` is always sent along (the server ignores both for now).
+- POST bodies use **Newtonsoft `$type` polymorphism**:
   `{"commands":[{"$type":"HyperQuest.GameServer.Contracts.TrackingCommand,
   HyperQuest.GameServer.Contracts","TrackingTag":{"$type":"…GameStartTracking,
   …","GameClientVersion":"280139","MachineId":"…","CreationDate":"",
-  "TrackingTagId":108}}]}` — beachte: Default-`DateTime` wird als **`""`**
-  serialisiert, `GameClientVersion` = Game-Paket-ID (`version.Game.txt`).
-- Stream-Parameter (`replayStream`) erscheinen wie erwartet **nicht** im
-  JSON-Body (`SendCommands` sendet nur `{"commands":[…]}`).
-- Erster Boot-Flow: `POST ServerCommandService.hqs/SendCommands`
-  (GameStart-Tracking) → `GET AccountInformationService.hqs/GetAccountInformation`.
+  "TrackingTagId":108}}]}` — note: a default `DateTime` is serialized as
+  **`""`**, `GameClientVersion` = game package ID (`version.Game.txt`).
+- Stream parameters (`replayStream`) do, as expected, **not** appear in the
+  JSON body (`SendCommands` sends only `{"commands":[…]}`).
+- First boot flow: `POST ServerCommandService.hqs/SendCommands`
+  (GameStart tracking) → `GET AccountInformationService.hqs/GetAccountInformation`.
 
-## Versionierung
+## Versioning
 
-- `[Service]` kann `ServiceVersion` tragen; `CheckServiceVersionInterceptor`
-  prüft Client-Version (`"v"`). Details/Toleranz noch zu verifizieren —
-  der Nachbau sollte jede Version akzeptieren.
-- `Content-Length: 0`-POSTs ohne Body sind zulässig (parameterlose Calls).
+- `[Service]` can carry a `ServiceVersion`; `CheckServiceVersionInterceptor`
+  checks the client version (`"v"`). Details/tolerance still to be verified —
+  the rebuild should accept any version.
+- `Content-Length: 0` POSTs without a body are permitted (parameterless calls).
 
-## Fehler
+## Errors
 
-- HTTP-Status = `ServiceException.HttpStatusCode`,
-  `Content-Type: application/json`, Body = `ServiceExceptionSerializer`-JSON
-  (Code, Meldung, …). Client wirft daraus typisierte Exceptions
-  (`InvalidConnectionTokenException` → Re-Login nötig).
-- Unbekannte Route/Methode → 404-JSON (`NotFoundException`).
+- HTTP status = `ServiceException.HttpStatusCode`,
+  `Content-Type: application/json`, body = `ServiceExceptionSerializer` JSON
+  (code, message, …). The client turns this into typed exceptions
+  (`InvalidConnectionTokenException` → re-login required).
+- Unknown route/method → 404 JSON (`NotFoundException`).
 
-## Timeouts / Sonstiges
+## Timeouts / miscellaneous
 
-- Client-Timeout: 1.200.000 ms; `HttpCompression`-Flag (Launcher-Config)
-  deutet auf optionale Kompression.
-- Header `sl: <ms>` (Server): zufälliger Zusatz-Sleep (Timing-Verschleierung) —
-  im Nachbau ignorierbar.
+- Client timeout: 1,200,000 ms; the `HttpCompression` flag (launcher config)
+  suggests optional compression.
+- Header `sl: <ms>` (server): random extra sleep (timing obfuscation) —
+  can be ignored in the rebuild.
 
-## Response-Wrapper (statisch verifiziert, 13.10.2026)
+## Response wrapper (statically verified, 2026-10-13)
 
-Entgegen dem Server-Default (`BodyStyle=bare`) erwartet **dieser Client**
-jede JSON-Antwort als `WrappedResponse`: Der generische Proxy-Handler
-(`MightyQuest_release.exe` `0x5cc280`) deserialisiert mit festem Typ
-`"Util.Common.Service.WrappedResponse, Util.Common.Service"` und legt
-dessen `Result` im Task-Ergebnis-Slot (`Task+0x9B8`) ab. Property-Name
-`Result` laut `Util.Common.Service.dll` (`WrappedResponse`1`).
+Contrary to the server default (`BodyStyle=bare`), **this client** expects
+every JSON response as a `WrappedResponse`: the generic proxy handler
+(`MightyQuest_release.exe` `0x5cc280`) deserializes with the fixed type
+`"Util.Common.Service.WrappedResponse, Util.Common.Service"` and stores
+its `Result` in the task result slot (`Task+0x9B8`). Property name
+`Result` per `Util.Common.Service.dll` (`WrappedResponse`1`).
 
 ```json
 {"Result":{"$type":"HyperQuest.GameServer.Contracts.AccountInformation, HyperQuest.GameServer.Contracts", …}}
 ```
 
-Der Wrapper selbst trägt **kein `$type`**: `WrappedResponse` fehlt in der
-Typ-Tabelle des Clients (2293 sortierte Namen, letzter `UIContracts…`), und
-die Binärsuche (`0x1285020`) liest bei Namen, die hinter dem letzten Eintrag
-sortieren, einen Eintrag über das Tabellenende hinaus → Access Violation
-(`0xE123456E`), Prozess endet still (Minidump bestätigt). Leere Antworten
-(void-Methoden) bleiben `{}`.
+The wrapper itself carries **no `$type`**: `WrappedResponse` is missing from
+the client's type table (2293 sorted names, last one `UIContracts…`), and
+the binary search (`0x1285020`) reads an entry past the end of the table
+for names that sort after the last entry → access violation
+(`0xE123456E`), the process ends silently (minidump confirmed). Empty
+responses (void methods) stay `{}`.
 
-Nackte DTO-Antwort mit `$type` → Parse ok, aber `Result` NULL
-(`GetBuildInfo:279`); ohne `$type` → `0x80030003`. `game_server.py`
-wickelt alle JSON-Antworten zentral ein (`wrap_response`).
+A bare DTO response with `$type` → parse OK, but `Result` is NULL
+(`GetBuildInfo:279`); without `$type` → `0x80030003`. `game_server.py`
+wraps all JSON responses centrally (`wrap_response`).
 
-## TimeSpan-Format (Update3-Client)
+## TimeSpan format (Update3 client)
 
-Der JSON-Leser des Clients (0x122c680) erwartet TimeSpans **nicht** als .NET-`"d.hh:mm:ss"`,
-sondern als String aus Zahl+Einheit-Folgen, optional mit `-` davor: `w` (Woche), `d`, `h`, `m`, `s`,
-in Groß- und Kleinschreibung, Ergebnis in Sekunden. Beispiele: `"7d"`, `"1h30m"`, `"0s"`.
-Achtung: Viele Dauer-Felder sind im Client gar keine TimeSpans, sondern Ganzzahlen (z. B. `CastleInfo.AverageDuration`,
-`CastleValidationDuration`), und Listen wie `CompletionReward` erwarten `[`, nicht `null`. Im Zweifel den
-Feldleser prüfen: `tools/client_members.py` + Disassembly; gleicher Leser-Call wie bei einem bekannten Int-Feld = Int.
-Mit `"00:00:00"` meldet der Client `JSON ERROR: …: Not a time span`, bricht das Lesen ab und lädt dann endlos.
+The client's JSON reader (0x122c680) expects TimeSpans **not** as .NET `"d.hh:mm:ss"`,
+but as a string of number+unit sequences, optionally prefixed with `-`: `w` (week), `d`, `h`, `m`, `s`,
+in upper and lower case, result in seconds. Examples: `"7d"`, `"1h30m"`, `"0s"`.
+Caution: many duration fields are not TimeSpans in the client at all, but integers (e.g. `CastleInfo.AverageDuration`,
+`CastleValidationDuration`), and lists such as `CompletionReward` expect `[`, not `null`. When in doubt, check the
+field reader: `tools/client_members.py` + disassembly; same reader call as a known int field = int.
+With `"00:00:00"` the client reports `JSON ERROR: …: Not a time span`, aborts reading and then loads forever.
 
-## Server-Notifications (Zustandsänderungen nach Aktionen)
+## Server notifications (state changes after actions)
 
-Der Client übernimmt Ergebnisse serverseitiger Aktionen (Angriffsbeute:
-Gold, XP, Items …) **nicht selbst**, und `GetAccountInformation` ruft er nur
-beim Start. Im Original kamen solche Änderungen als Push-Notifications
-(~100 Typen, u. a. `WalletUpdatedNotification`, `HeroInventoryAddedNotification`,
-`HeroXpChangedNotification`, `MinePillagedNotification`; Basis
+The client does **not** apply the results of server-side actions (attack loot:
+gold, XP, items …) on its own, and only calls `GetAccountInformation` at
+startup. In the original, such changes arrived as push notifications
+(~100 types, among others `WalletUpdatedNotification`, `HeroInventoryAddedNotification`,
+`HeroXpChangedNotification`, `MinePillagedNotification`; base
 `Notification {Index, NotificationType}`).
 
-- `ServerNotificationController` (`0xe22710`) verarbeitet empfangene
-  Notifications der Reihe nach und vergleicht `Index` mit dem eigenen Zähler
-  (`+0xcb50`) — genau dieser Zähler geht als Request-Header **`n`** an den
-  Server. Bei einer Lücke ruft der Client `NotificationService.CheckNotifications`
-  (void), damit der Server Fehlendes erneut schickt.
-- **Transport ist der Antwort-Wrapper jeder HTTP-Antwort**, nicht XMPP: Der
-  Client liest ihn mit `HyperquestWrappedResponseSerializer`, Felder `Result`,
-  `Notifications`, `GlobalNotifications`, `AccountForValidation` (die
-  Toolbox-`WrappedResponse`1` kennt nur `Result`). `ServerNotificationController`
-  abonniert das entsprechende Ereignis des ArgoManagers (HTTP-Schicht).
+- `ServerNotificationController` (`0xe22710`) processes received
+  notifications in order and compares `Index` with its own counter
+  (`+0xcb50`) — exactly this counter goes to the server as the request header **`n`**.
+  On a gap, the client calls `NotificationService.CheckNotifications`
+  (void) so that the server resends what is missing.
+- **The transport is the response wrapper of every HTTP response**, not XMPP: the
+  client reads it with `HyperquestWrappedResponseSerializer`, fields `Result`,
+  `Notifications`, `GlobalNotifications`, `AccountForValidation` (the
+  toolbox `WrappedResponse`1` only knows `Result`). `ServerNotificationController`
+  subscribes to the corresponding ArgoManager event (HTTP layer).
 - Format: `{"Result": …, "Notifications": [{"$type": "…WalletUpdatedNotification, …",
-  "Index": 1, "NotificationType": "WalletUpdated", …}]}`; `NotificationType` als
-  Enum-Name (Liste im Client direkt hinter den `…Notification`-Klassennamen).
-- Umsetzung: `server/notifications.py` (Warteschlange, `n` = Bestätigung,
-  Reset bei `GetAccountInformation`).
-- Folge, verifiziert 14.10.2026 mit frischem Account: Gold/XP/Items eines
-  Angriffs erscheinen erst nach Client-Neustart (Server-Zustand stimmt).
+  "Index": 1, "NotificationType": "WalletUpdated", …}]}`; `NotificationType` as
+  an enum name (list in the client directly after the `…Notification` class names).
+- Implementation: `server/notifications.py` (queue, `n` = acknowledgment,
+  reset on `GetAccountInformation`).
+- Consequence, verified 2026-10-14 with a fresh account: gold/XP/items from an
+  attack only appear after a client restart (server state is correct).
