@@ -251,7 +251,9 @@ def start_attack(account, body, session, boosts=([], {}), delegated=None):
     creature_loot = {} if practice else loot.creature_loot(
         c, hero["Level"], rare_ratio)
     if not (c.get("IsTutorialCastle") or body.get("ubisoftCompetitionId")):
-        loot.add_bling_drop(creature_loot, account, time.time())
+        # PvP = player castle (incl. the bot players), PvE = campaign castle
+        loot.add_bling_drop(creature_loot, account, time.time(),
+                            pvp=castles.castle_type(c) == castles.CASTLE_TYPE_USER)
     tr_gold, tr_lf = loot.treasure_room(
         sum(x["Gold"] for x in creature_loot.values()),
         sum(x["LifeForce"] for x in creature_loot.values()), c, hero["Level"])

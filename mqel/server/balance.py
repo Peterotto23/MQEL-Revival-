@@ -86,12 +86,13 @@ def objectives():
 def fields():
     """{(section, key): {Default, Min, Max, Kind, Label, Help}}."""
     out = {
-        # Bling mine (building 16): 1 bling per ProductionHours hours,
+        # Bling mine (building 16): BlingsPerHour blings every hour (the
+        # production period stays 1 h, ProductionValue carries the rate),
         # storage Capacity; lootable for at most StealHours hours of
-        # production (at least 1, like PremiumCashMineLossAmount)
-        ("Mine", "ProductionHours"): {
-            "Default": 4, "Min": 1, "Max": 24, "Kind": "data",
-            "Label": "Hours per bling", "Help": "Original: 1"},
+        # production (0 = not lootable)
+        ("Mine", "BlingsPerHour"): {
+            "Default": 50, "Min": 1, "Max": 1000, "Kind": "data",
+            "Label": "Blings per hour", "Help": "Original: 1"},
         ("Mine", "Capacity"): {
             "Default": 42, "Min": 1, "Max": 1000, "Kind": "data",
             "Label": "Capacity", "Help": "Original: 42"},
@@ -104,13 +105,23 @@ def fields():
             "Help": "At least 1 bling; 0 = not lootable. Original: whole content"},
         # Rare bling loot: with some chance a creature carries Amount blings;
         # at most WeeklyCap from loot in the last 7 days (rolling);
-        # WeeklyCap 0 = unlimited
+        # WeeklyCap 0 = unlimited. PvP / PvE choose by castle type: player
+        # castles (CastleType User, incl. the bot players) are PvP, the
+        # Ubisoft campaign castles (incl. boss dungeons) are PvE.
         ("Loot", "Chance"): {
             "Default": 40, "Min": 0, "Max": 100, "Kind": "server",
             "Label": "Chance per attack (%)",
             "Help": "Real attacks only (no practice, tutorial, competition)"},
+        ("Loot", "PvP"): {
+            "Default": 1, "Min": 0, "Max": 1, "Kind": "server",
+            "Label": "Drops in player castles (PvP)",
+            "Help": "1 = on, 0 = off. Player castles, bot players included"},
+        ("Loot", "PvE"): {
+            "Default": 0, "Min": 0, "Max": 1, "Kind": "server",
+            "Label": "Drops in campaign castles (PvE)",
+            "Help": "1 = on, 0 = off. Campaign castles; boss raids pay via the Boss values"},
         ("Loot", "Amount"): {
-            "Default": 10, "Min": 1, "Max": 500, "Kind": "server",
+            "Default": 10, "Min": 1, "Max": 1000, "Kind": "server",
             "Label": "Blings per drop", "Help": "Carried by one random creature"},
         ("Loot", "WeeklyCap"): {
             "Default": 0, "Min": 0, "Max": 1000000, "Kind": "server",
@@ -310,11 +321,20 @@ EARLY_HEROES = re.compile(rb',\s*"EarlyHeroAccess":\s*\[[^\]]*\]')
 BLING_AMOUNT = re.compile(rb'("CurrencyType":(?:"PremiumCash"|1),\s*"Amount":)(\d+)')
 
 
+def _mine_rate(cv):
+    """(period hours, blings per period) of the bling mine in cv. Older states
+    in History have Mine.ProductionHours instead (1 bling per N hours)."""
+    if "Mine.BlingsPerHour" in cv:
+        return 1, cv["Mine.BlingsPerHour"]
+    return cv["Mine.ProductionHours"], 1
+
+
 def _mine_text(text, cv):
     # Match the number, not the original value: the Steam settings.bin has Capacity 42
-    # (the loose 2015 JSON says 25), and the hours may already differ from 1.
-    for pattern, new in ((rb'"ProductionPeriod":"\d+h"',
-                          b'"ProductionPeriod":"%dh"' % cv["Mine.ProductionHours"]),
+    # (the loose 2015 JSON says 25), and period/value may already differ from 1h / 1.
+    hours, value = _mine_rate(cv)
+    for pattern, new in ((rb'"ProductionPeriod":"\d+h"', b'"ProductionPeriod":"%dh"' % hours),
+                         (rb'"ProductionValue":\d+', b'"ProductionValue":%d' % value),
                          (rb'"Capacity":\d+', b'"Capacity":%d' % cv["Mine.Capacity"])):
         if len(re.findall(pattern, text)) != 1:
             raise RuntimeError(f"settings.bin: {pattern!r} not unique")
@@ -375,8 +395,9 @@ def mine_rank(spec_id, spec):
     """MineBuildingRankSpec of the bling mine with the configured values."""
     if spec is None or spec_id != BLING_MINE or not enabled():
         return spec
-    return dict(spec, ProductionPeriod=f"{get('Mine', 'ProductionHours')}h",
-                ProductionValue=1, Capacity=get("Mine", "Capacity"))
+    return dict(spec, ProductionPeriod="1h",
+                ProductionValue=get("Mine", "BlingsPerHour"),
+                Capacity=get("Mine", "Capacity"))
 
 
 def sku_price(sku):

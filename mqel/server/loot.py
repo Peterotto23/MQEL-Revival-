@@ -227,8 +227,9 @@ def stealable_buildings(castle, total_gold, total_lifeforce, hero_level=1):
                     amount = (0 if s.get("IsDestroyed") or not s.get("IsActive", True)
                               else s.get("CumulatedAmount", 0))
                     if balance.enabled():  # only a few hours of production
-                        steal = balance.get("Mine", "StealHours")
-                        steal = steal and max(1, steal // balance.get("Mine", "ProductionHours"))
+                        # StealHours of production (0 = not lootable); the
+                        # rate is at least 1 per hour, so at least 1 bling
+                        steal = balance.get("Mine", "StealHours") * balance.get("Mine", "BlingsPerHour")
                         amount = min(amount, steal)
                     out[b["Id"]] = (field, amount, False, False)
                 else:
@@ -280,10 +281,19 @@ def bling_loot_left(account, now):
     return max(0, cap - recent)
 
 
-def add_bling_drop(creature_loot, account, now, rng=random):
+def bling_drop_allowed(pvp):
+    """Whether creatures may carry blings in this kind of castle: pvp True =
+    player castle (Loot.PvP), False = campaign castle (Loot.PvE); None (kind
+    unknown) = allowed."""
+    return pvp is None or bool(balance.get("Loot", "PvP" if pvp else "PvE"))
+
+
+def add_bling_drop(creature_loot, account, now, rng=random, pvp=None):
     """With Loot.Chance, puts the blings on a random creature
-    (DefenseIngredientLoot.PremiumCash); capped to the remaining budget."""
-    if not balance.enabled() or not creature_loot:
+    (DefenseIngredientLoot.PremiumCash); capped to the remaining budget.
+    pvp: True for a player castle, False for a campaign castle (the attack
+    passes it; see bling_drop_allowed)."""
+    if not balance.enabled() or not creature_loot or not bling_drop_allowed(pvp):
         return
     if rng.random() * 100 >= balance.get("Loot", "Chance"):
         return

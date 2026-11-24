@@ -120,9 +120,13 @@ and would still have to collect daily. Therefore:
 - At most one hour of production is lootable (minimum
   `PremiumCashMineLossAmount` = 1), the rest stays with the owner.
 - Destroying only sets the yield of this attack to zero, not the contents.
-- Production 1/h, storage 42 (full after 42 h): deliberately rewards players who
-  collect every 1–2 days (~150–168 per week); weekly only 42 (decided
-  2026-11-09).
+- Production 50/h (`Mine.BlingsPerHour`, range 1–1000; community poll
+  2026-11-24, catching up with the boss raids), storage per the poll 400 (full
+  after 8 h; `Mine.Capacity`), one hour of production (50) lootable. Earlier
+  state (decided 2026-11-09): 1 bling per 4 h, storage 42.
+- The period stays 1 h, the rate is carried by `ProductionValue`, so the
+  client shows and the server pays the same number. States saved with
+  `Mine.ProductionHours` stay readable in `History` (`balance._mine_rate`).
 - Price 500 instead of 999 Blings (`Mine.Price`, data patch of SKU 15522 in
   ShopSkuBaseSettings, the server books via `balance.sku_price`): earned back after ~3–5
   weeks when collecting every 2–3 days, about 3 weeks of income for an average
@@ -187,9 +191,10 @@ readjusted before going live.
   always in the DataBin package (original when off) so that switching off leads
   back to the original. Own LZO packer (settings_archive.lzo_compress): ~4 MB
   delta, build ~17 s on first request.
-- **Bling mine:** when Enabled, castles.mine_rank delivers ProductionPeriod/
-  Capacity from balance; loot.stealable_buildings limits the loot to
-  StealHours of production (minimum 1). A newly built Bling mine starts
+- **Bling mine:** when Enabled, castles.mine_rank delivers ProductionPeriod
+  (1 h), ProductionValue (BlingsPerHour) and Capacity from balance;
+  loot.stealable_buildings limits the loot to StealHours x BlingsPerHour
+  (0 hours = not lootable). A newly built Bling mine starts
   empty like in the original (MineManager.AddMineStatus); harvesting reports
   EntityHarvestType PremiumCashMine (only in the final client).
 - **Achievements:** amount per achievement in the web tool (default points × 2,
@@ -209,7 +214,11 @@ readjusted before going live.
   objectives get nothing retroactively.
 - **Bling loot:** in real attacks (excluding practice, tutorial, competition),
   with `Loot.Chance` (default 40%) a random creature carries
-  `Loot.Amount` Blings (default 10; DefenseIngredientLoot.PremiumCash).
+  `Loot.Amount` Blings (default 10, up to 1000; DefenseIngredientLoot.PremiumCash).
+  Where it drops is chosen by castle type: `Loot.PvP` (default on) = player
+  castles incl. the bot players (CastleType User), `Loot.PvE` (default off) =
+  campaign castles incl. boss dungeons, which pay via `Boss.<castle id>`
+  instead (`attack.start_attack` passes `pvp=` to `loot.add_bling_drop`).
   Credited when killed (KilledCreatureIds; the client reports no separate
   ID list for Blings), shown in the report under TotalPremiumCash.
   Cap `Loot.WeeklyCap` (600) in a rolling 7-day window

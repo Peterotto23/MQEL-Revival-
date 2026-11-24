@@ -723,9 +723,13 @@ class BalanceTest(unittest.TestCase):
         before = next(p for p in patcher.packages(today) if p.rm_type == 2).version
         balance.update({"Enabled": True}, "2026-03-10T00:00:00Z")
         spec = castles.mine_rank(16, 1)
-        self.assertEqual((spec["ProductionPeriod"], spec["Capacity"]), ("4h", 42))
-        self.assertEqual(loot.stealable_buildings(self.mine_castle(20), 0, 0)[7][1], 1)
-        balance.update({"Mine": {"ProductionHours": 1, "StealHours": 3}}, "x")
+        self.assertEqual(
+            (spec["ProductionPeriod"], spec["ProductionValue"], spec["Capacity"]),
+            ("1h", 50, 42),
+        )
+        # one hour of production (50) is lootable, not the whole fill level
+        self.assertEqual(loot.stealable_buildings(self.mine_castle(200), 0, 0)[7][1], 50)
+        balance.update({"Mine": {"BlingsPerHour": 1, "StealHours": 3}}, "x")
         self.assertEqual(loot.stealable_buildings(self.mine_castle(20), 0, 0)[7][1], 3)
         after = next(p for p in patcher.packages(today) if p.rm_type == 2).version
         self.assertEqual(after, before + "." + balance.client_version())
@@ -736,6 +740,7 @@ class BalanceTest(unittest.TestCase):
         i = content.index(balance.MINE_FILE)
         self.assertIn(b'"ProductionPeriod":"1h"', content[i : i + 3000])
         self.assertIn(b'"Capacity":42,', content[i : i + 3000])
+        self.assertRegex(content[i : i + 3000], rb'"ProductionValue":1\b')
         s = content.index(b'"Code":"15522"')
         self.assertRegex(content[s : s + 300], rb'"Amount":500\b')
         self.assertEqual(
@@ -768,6 +773,59 @@ class BalanceTest(unittest.TestCase):
         # the old state stays known (deltas from there), an unknown one does not
         self.assertIsNotNone(patcher._version_parts(after))
         self.assertIsNone(patcher._version_parts(before + ".Bdeadbeef"))
+
+    def test_mine_rate_and_ranges(self):
+        balance.update(
+            {"Enabled": True, "Mine": {"BlingsPerHour": 1000, "Capacity": 1000}}, "x"
+        )
+        spec = castles.mine_rank(16, 1)
+        self.assertEqual(
+            (spec["ProductionPeriod"], spec["ProductionValue"]), ("1h", 1000)
+        )
+        for bad in (0, 1001):
+            with self.assertRaises(ValueError):
+                balance.update({"Mine": {"BlingsPerHour": bad}}, "x")
+        balance.update({"Loot": {"Amount": 1000}}, "x")  # up to 1000 per drop
+        with self.assertRaises(ValueError):
+            balance.update({"Loot": {"Amount": 1001}}, "x")
+        # states saved before the change had hours per bling
+        self.assertEqual(balance._mine_rate({"Mine.ProductionHours": 4}), (4, 1))
+        self.assertEqual(balance._mine_rate({"Mine.BlingsPerHour": 50}), (1, 50))
+        # lootable = StealHours x rate; 0 hours = not lootable
+        balance.update({"Mine": {"BlingsPerHour": 50, "StealHours": 1}}, "x")
+        self.assertEqual(loot.stealable_buildings(self.mine_castle(400), 0, 0)[7][1], 50)
+        self.assertEqual(loot.stealable_buildings(self.mine_castle(20), 0, 0)[7][1], 20)
+        balance.update({"Mine": {"StealHours": 0}}, "x")
+        self.assertEqual(loot.stealable_buildings(self.mine_castle(400), 0, 0)[7][1], 0)
+
+    def test_bling_loot_pvp_pve(self):
+        account, now = {}, 1_000_000
+        balance.update(
+            {"Enabled": True, "Loot": {"Chance": 100, "Amount": 10, "WeeklyCap": 0}}, "x"
+        )
+
+        def dropped(pvp):
+            table = {1: {}, 2: {}}
+            loot.add_bling_drop(table, account, now, pvp=pvp)
+            return sum(x.get("PremiumCash", 0) for x in table.values())
+
+        self.assertEqual(dropped(True), 10)  # default: player castles drop
+        self.assertEqual(dropped(False), 0)  # default: campaign castles do not
+        self.assertEqual(dropped(None), 10)  # kind unknown: allowed
+        balance.update({"Loot": {"PvP": 0, "PvE": 1}}, "x")
+        self.assertEqual((dropped(True), dropped(False)), (0, 10))
+        balance.update({"Loot": {"PvP": 1, "PvE": 1}}, "x")
+        self.assertEqual((dropped(True), dropped(False)), (10, 10))
+        balance.update({"Loot": {"PvP": 0, "PvE": 0}}, "x")
+        self.assertEqual((dropped(True), dropped(False)), (0, 0))
+        with self.assertRaises(ValueError):
+            balance.update({"Loot": {"PvP": 2}}, "x")
+        # castle kinds as attack.start_attack tells them apart
+        self.assertEqual(
+            castles.castle_type({"_CastleType": castles.CASTLE_TYPE_USER}),
+            castles.CASTLE_TYPE_USER,
+        )
+        self.assertEqual(castles.castle_type({}), castles.CASTLE_TYPE_UBISOFT)
 
     def test_bling_loot(self):
         account, now = {}, 1_000_000
