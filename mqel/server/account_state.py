@@ -1441,7 +1441,20 @@ class AccountState:
         level = min(sku["ItemCount"] + bonus, settings["MaxForgeItemLevel"])
         hero = self.account.get("SelectedHeroId")
         if mode == "Reforged":  # gleicher Typ wie das Ausgangsteil
-            item = item_drops.reforge_item(source, level, quality)
+            if source is None:
+                raise ValueError("Umschmieden ohne Ausgangsteil")
+            # gleiche Qualitaet, gespielter Held, zufaelliger anderer Slot
+            item = item_drops.reforge_item(source, level, quality, hero)
+            if item is not None:  # REFORGE_PATCH_V3: Diagnose
+                try:
+                    _by = item_drops._templates_by_id()
+                    _s = _by[source["TemplateId"]]["HeroItemTypeId"]
+                    _o = _by[item["TemplateId"]]["HeroItemTypeId"]
+                    self.log(f"    [reforge] hero={hero} src_type={_s}"
+                             f"({item_drops._category(_s)}) -> out_type={_o}"
+                             f"({item_drops._category(_o)}) worn={bool(worn)}")
+                except (KeyError, TypeError) as e:
+                    self.log(f"    [reforge] Diagnose fehlgeschlagen: {e!r}")
         elif mode == "Upgraded":  # dasselbe Teil, Level + Zuschlag
             if source is None:
                 raise ValueError("Aufwerten ohne Ausgangsteil")
@@ -1586,8 +1599,11 @@ class AccountState:
             return
         del self.account[self.FORGE_MAIN_HAND]
         equipment = self._hero(pending["Hero"])["Equipment"]
-        if equipment.get("MainHand") == pending["Old"]:
-            equipment["MainHand"] = None
+        new_type = self.data.templates.get(pending["New"]["TemplateId"], {}).get("HeroItemTypeId")
+        if (equipment.get("MainHand") is None
+                and item_drops._category(new_type) == "Weapon"
+                and self._remove_item(pending["New"])):
+            equipment["MainHand"] = pending["New"]
         elif not self._remove_item(pending["Old"]):
             self.log("    [state] Schmiede: alte Waffe nicht gefunden")
         # ohne Waffe asserted der Client -> die neue anlegen

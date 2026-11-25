@@ -483,7 +483,35 @@ def _fake_player(c):
     return f
 
 
+import threading as _threading
+import time as _time
+
+# fake_player_castles() reads ~8500 castle JSON files. player_castle() calls it
+# for every real player without a published castle, so one attack selection
+# (More Castles / GetAttackSelectionList) rebuilt it once per player: ~4-5 s
+# with 174 accounts. Cache it; the TTL keeps time-limited event castles fresh.
+_FAKES_TTL = 300  # seconds
+_fakes_cache = (0.0, None)
+_fakes_lock = _threading.Lock()
+
+
 def fake_player_castles():
+    """Ersatzspieler (zwischengespeichert, siehe _build_fake_player_castles).
+    Liefert eine neue Liste, die Burg-Dicts sind geteilt: nicht veraendern,
+    vorher kopieren (player_castle macht das schon)."""
+    global _fakes_cache
+    stamp, value = _fakes_cache
+    if value is not None and _time.monotonic() - stamp < _FAKES_TTL:
+        return list(value)
+    with _fakes_lock:
+        stamp, value = _fakes_cache
+        if value is None or _time.monotonic() - stamp >= _FAKES_TTL:
+            value = _build_fake_player_castles()
+            _fakes_cache = (_time.monotonic(), value)
+        return list(value)
+
+
+def _build_fake_player_castles():
     """Ersatzspieler aus den Ubisoft-Burgen ohne Tutorial- und Bossburgen."""
     bosses = {r.get("BossCastleId") for r in attack_regions().values()}
     return [f for f in (_fake_player(c) for c in load_pve_castles()

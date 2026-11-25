@@ -233,10 +233,41 @@ def forge_item(hero_spec, level, quality):
     return None
 
 
-def reforge_item(source, level, quality):
-    """Umschmieden: gleicher Item-Typ und Archetyp wie `source`, Template,
-    Effekte und Werte neu gewürfelt; None, wenn es keins gibt."""
-    type_id = _templates_by_id()[source["TemplateId"]]["HeroItemTypeId"]
+# REFORGE_PATCH_V3
+print("[reforge] patch v3 active, item_drops loaded from " + os.path.abspath(__file__), flush=True)
+
+REFORGE_SLOTS = ("Weapon", "Helm", "ShoulderArmor", "SuitOfArmor", "Gloves", "Capes")
+
+
+def reforge_item(source, level, quality, hero=None, keep_slot=False):
+    """Umschmieden: gleiche Qualitaet, NEUES Item fuer den gespielten Helden `hero`,
+    Slot zufaellig (Waffe/Helm/Schultern/Brust/Handschuhe/Umhang), nie derselbe Slot wie
+    `source`; Ringe und Amulette kommen nie heraus. `keep_slot` wird ignoriert.
+    Pets bleiben Pets. Ohne Held oder wenn nichts passt: gleicher Typ wie `source`."""
+    src_type = _templates_by_id()[source["TemplateId"]]["HeroItemTypeId"]
+    src_cat = _category(src_type)
+    own = hero_item_types(hero) if hero else ()
+    if not own or src_cat == "Pet":
+        return _reforge_same_type(source, level, quality, src_type)
+    by_cat = {}
+    for t, _w in own:
+        if _category(t) in REFORGE_SLOTS:
+            by_cat.setdefault(_category(t), []).append(t)
+    cats = [c for c in REFORGE_SLOTS if c in by_cat and c != src_cat]
+    random.shuffle(cats)
+    fallback = None
+    for cat in cats:
+        for type_id in by_cat[cat]:
+            for _ in range(TYPE_ROLLS):
+                item = _roll_typed(None, level, level, quality=quality, type_id=type_id)
+                if item and item["TemplateId"] != source["TemplateId"]:
+                    return item
+                fallback = fallback or item
+    return fallback or _reforge_same_type(source, level, quality, src_type)
+
+
+def _reforge_same_type(source, level, quality, type_id):
+    """Altes Verhalten: gleicher Item-Typ und Archetyp wie `source`."""
     item = _roll_typed(None, level, level, quality=quality, type_id=type_id)
     if item is None:  # Typen nur mit Named-Templates (z. B. Pets)
         named = [t for t in _templates() if t.get("Rarity") == "Named"
