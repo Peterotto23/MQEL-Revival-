@@ -1,12 +1,13 @@
 {
-  "_readme": "Reference catalogue of monitor resolutions. NOT read by the game; used by tools/set_resolution.py. Kept as a separate file on purpose: it is untested whether the engine tolerates unknown keys inside EngineSettings.json/CustomUserSettings.json.",
+  "_readme": "Reference catalogue of monitor resolutions. NOT read by the game; used by server/setResolution.py. Kept as a separate file on purpose: it is untested whether the engine tolerates unknown keys inside EngineSettings.json/CustomUserSettings.json. Sorted by width then height. Phone, TV and cinema-only sizes are left out on purpose.",
   "generated": "2026-11-26",
   "sources": [
     "DisplayNinja ultrawide/curved monitor lists (Jul 2026)",
     "RTINGS resolution test page; Samsung and ViewSonic buying guides",
     "Steam Hardware Survey Aug 2026 via tech-insider.org (1080p) and fixgamingchannel.com (ultrawide, 4K)",
     "TechRadar / EveryMac / ID.nl for 5K, 6K, 8K availability",
-    "MQLog.txt from this client folder (engine's own 'Available screen sizes')"
+    "MQLog.txt from this client folder (engine's own 'Available screen sizes')",
+    "Wikipedia 'Display resolution standards'; HandBrake display-scaling table (QWXGA, WQUXGA, QWXGA+, WFHD+); Apple and Microsoft Surface panel sizes from product specs (not re-checked this session)"
   ],
   "uiScaling": {
     "baseWidth": 1920,
@@ -78,6 +79,16 @@
     },
     {
       "width": 1280,
+      "height": 720,
+      "name": "HD (720p)",
+      "aspect": "16:9",
+      "category": "16:9",
+      "uiZoom": 0.666,
+      "inDevEngineLog": true,
+      "note": "game default window size"
+    },
+    {
+      "width": 1280,
       "height": 768,
       "name": "WXGA",
       "aspect": "5:3",
@@ -127,6 +138,25 @@
       "note": "engine log only"
     },
     {
+      "width": 1366,
+      "height": 768,
+      "name": "HD laptop",
+      "aspect": "16:9",
+      "category": "16:9",
+      "uiZoom": 0.711,
+      "inDevEngineLog": true,
+      "note": "budget laptop panels"
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "name": "WXGA+",
+      "aspect": "16:10",
+      "category": "16:10",
+      "uiZoom": 0.833,
+      "inDevEngineLog": true
+    },
+    {
       "width": 1440,
       "height": 1080,
       "name": "4:3 HD",
@@ -135,6 +165,15 @@
       "uiZoom": 1,
       "inDevEngineLog": true,
       "note": "engine log only"
+    },
+    {
+      "width": 1600,
+      "height": 900,
+      "name": "HD+",
+      "aspect": "16:9",
+      "category": "16:9",
+      "uiZoom": 0.833,
+      "inDevEngineLog": true
     },
     {
       "width": 1600,
@@ -147,32 +186,21 @@
       "note": "engine log only"
     },
     {
-      "width": 1280,
-      "height": 720,
-      "name": "HD (720p)",
-      "aspect": "16:9",
-      "category": "16:9",
-      "uiZoom": 0.666,
-      "inDevEngineLog": true,
-      "note": "game default window size"
-    },
-    {
-      "width": 1366,
-      "height": 768,
-      "name": "HD laptop",
-      "aspect": "16:9",
-      "category": "16:9",
-      "uiZoom": 0.711,
-      "inDevEngineLog": true,
-      "note": "budget laptop panels"
-    },
-    {
       "width": 1600,
-      "height": 900,
-      "name": "HD+",
-      "aspect": "16:9",
-      "category": "16:9",
-      "uiZoom": 0.833,
+      "height": 1200,
+      "name": "UXGA",
+      "aspect": "4:3",
+      "category": "legacy",
+      "uiZoom": 1,
+      "note": "older 20in 4:3 monitors"
+    },
+    {
+      "width": 1680,
+      "height": 1050,
+      "name": "WSXGA+",
+      "aspect": "16:10",
+      "category": "16:10",
+      "uiZoom": 0.972,
       "inDevEngineLog": true
     },
     {
@@ -187,74 +215,6 @@
       "note": "most common Steam primary display"
     },
     {
-      "width": 2560,
-      "height": 1440,
-      "name": "QHD (1440p)",
-      "aspect": "16:9",
-      "category": "16:9",
-      "uiZoom": 1,
-      "inDevEngineLog": false,
-      "note": "second most common; Steam share swings 20-39% between monthly surveys"
-    },
-    {
-      "width": 3840,
-      "height": 2160,
-      "name": "4K UHD",
-      "aspect": "16:9",
-      "category": "16:9",
-      "uiZoom": 1,
-      "inDevEngineLog": true,
-      "steamShareAug2026Pct": 5.02
-    },
-    {
-      "width": 5120,
-      "height": 2880,
-      "name": "5K",
-      "aspect": "16:9",
-      "category": "high-res",
-      "uiZoom": 1,
-      "inDevEngineLog": false,
-      "note": "e.g. 27in 5K gaming/pro monitors"
-    },
-    {
-      "width": 6016,
-      "height": 3384,
-      "name": "6K",
-      "aspect": "16:9",
-      "category": "high-res",
-      "uiZoom": 1,
-      "inDevEngineLog": false,
-      "note": "e.g. 32in 6K creator monitors (Dell, LG, ASUS, Acer)"
-    },
-    {
-      "width": 7680,
-      "height": 4320,
-      "name": "8K UHD",
-      "aspect": "16:9",
-      "category": "high-res",
-      "uiZoom": 1,
-      "inDevEngineLog": false,
-      "note": "e.g. Dell UP3218K"
-    },
-    {
-      "width": 1440,
-      "height": 900,
-      "name": "WXGA+",
-      "aspect": "16:10",
-      "category": "16:10",
-      "uiZoom": 0.833,
-      "inDevEngineLog": true
-    },
-    {
-      "width": 1680,
-      "height": 1050,
-      "name": "WSXGA+",
-      "aspect": "16:10",
-      "category": "16:10",
-      "uiZoom": 0.972,
-      "inDevEngineLog": true
-    },
-    {
       "width": 1920,
       "height": 1200,
       "name": "WUXGA",
@@ -264,14 +224,67 @@
       "inDevEngineLog": false
     },
     {
-      "width": 2560,
-      "height": 1600,
-      "name": "WQXGA",
+      "width": 2048,
+      "height": 1152,
+      "name": "QWXGA",
+      "aspect": "16:9",
+      "category": "16:9",
+      "uiZoom": 1,
+      "note": "uncommon 23in panels; Windows scaling target"
+    },
+    {
+      "width": 2048,
+      "height": 1536,
+      "name": "QXGA",
+      "aspect": "4:3",
+      "category": "legacy",
+      "uiZoom": 1,
+      "note": "iPad-class and late CRT/LCD 4:3"
+    },
+    {
+      "width": 2160,
+      "height": 1440,
+      "name": "Surface Pro 3",
+      "aspect": "3:2",
+      "category": "3:2",
+      "uiZoom": 1,
+      "note": "Surface Pro 3, Huawei MateBook"
+    },
+    {
+      "width": 2256,
+      "height": 1504,
+      "name": "Surface Laptop 13.5",
+      "aspect": "3:2",
+      "category": "3:2",
+      "uiZoom": 1,
+      "note": "Surface Laptop 13.5in"
+    },
+    {
+      "width": 2304,
+      "height": 1440,
+      "name": "MacBook 12",
       "aspect": "16:10",
       "category": "16:10",
       "uiZoom": 1,
-      "inDevEngineLog": false,
-      "note": "gaining share on Steam in 2026; Dell UltraSharp 30in"
+      "note": "12in Retina MacBook"
+    },
+    {
+      "width": 2400,
+      "height": 1600,
+      "name": "Surface Laptop Studio",
+      "aspect": "3:2",
+      "category": "3:2",
+      "uiZoom": 1,
+      "note": "Surface Laptop Studio"
+    },
+    {
+      "width": 2496,
+      "height": 1664,
+      "name": "Surface Laptop 15",
+      "aspect": "3:2",
+      "category": "3:2",
+      "uiZoom": 1,
+      "note": "Surface Laptop 15in"
     },
     {
       "width": 2560,
@@ -285,6 +298,125 @@
       "note": "budget ultrawide, typically 29-30in"
     },
     {
+      "width": 2560,
+      "height": 1440,
+      "name": "QHD (1440p)",
+      "aspect": "16:9",
+      "category": "16:9",
+      "uiZoom": 1,
+      "inDevEngineLog": false,
+      "note": "second most common; Steam share swings 20-39% between monthly surveys"
+    },
+    {
+      "width": 2560,
+      "height": 1600,
+      "name": "WQXGA",
+      "aspect": "16:10",
+      "category": "16:10",
+      "uiZoom": 1,
+      "inDevEngineLog": false,
+      "note": "gaining share on Steam in 2026; Dell UltraSharp 30in"
+    },
+    {
+      "width": 2560,
+      "height": 1664,
+      "name": "MacBook Air 13 M2",
+      "aspect": "16:10",
+      "category": "16:10",
+      "uiZoom": 1,
+      "note": "13.6in MacBook Air (M2 and later)"
+    },
+    {
+      "width": 2736,
+      "height": 1824,
+      "name": "Surface Pro 4-7",
+      "aspect": "3:2",
+      "category": "3:2",
+      "uiZoom": 1,
+      "note": "Surface Pro 4 to 7"
+    },
+    {
+      "width": 2880,
+      "height": 1200,
+      "name": "WFHD+",
+      "aspect": "12:5",
+      "category": "ultrawide",
+      "uiZoom": 1,
+      "note": "rare; listed in HandBrake's display table"
+    },
+    {
+      "width": 2880,
+      "height": 1620,
+      "name": "3K 16:9",
+      "aspect": "16:9",
+      "category": "16:9",
+      "uiZoom": 1,
+      "note": "common laptop/HiDPI mode"
+    },
+    {
+      "width": 2880,
+      "height": 1800,
+      "name": "MacBook Pro 15 Retina",
+      "aspect": "16:10",
+      "category": "16:10",
+      "uiZoom": 1,
+      "note": "15in Retina MacBook Pro, 3K laptop panels"
+    },
+    {
+      "width": 2880,
+      "height": 1864,
+      "name": "MacBook Air 15",
+      "aspect": "16:10",
+      "category": "16:10",
+      "uiZoom": 1,
+      "note": "15.3in MacBook Air"
+    },
+    {
+      "width": 2880,
+      "height": 1920,
+      "name": "Surface Pro 8-11",
+      "aspect": "3:2",
+      "category": "3:2",
+      "uiZoom": 1,
+      "note": "Surface Pro 8 and later"
+    },
+    {
+      "width": 3000,
+      "height": 2000,
+      "name": "Surface Book 13.5",
+      "aspect": "3:2",
+      "category": "3:2",
+      "uiZoom": 1,
+      "note": "Surface Book 2 13.5in"
+    },
+    {
+      "width": 3024,
+      "height": 1964,
+      "name": "MacBook Pro 14",
+      "aspect": "16:10",
+      "category": "16:10",
+      "uiZoom": 1,
+      "note": "14.2in MacBook Pro"
+    },
+    {
+      "width": 3200,
+      "height": 1800,
+      "name": "QHD+ (QWXGA+)",
+      "aspect": "16:9",
+      "category": "16:9",
+      "uiZoom": 1,
+      "note": "3K-class laptop and some 15-17in panels"
+    },
+    {
+      "width": 3240,
+      "height": 2160,
+      "name": "Surface Book 15",
+      "aspect": "3:2",
+      "category": "3:2",
+      "uiZoom": 1,
+      "note": "Surface Book 2 15in"
+    },
+    {
       "width": 3440,
       "height": 1440,
       "name": "UW-QHD",
@@ -294,6 +426,25 @@
       "inDevEngineLog": false,
       "steamShareAug2026Pct": 3.12,
       "note": "standard 34in ultrawide; also 39-45in OLED"
+    },
+    {
+      "width": 3456,
+      "height": 2234,
+      "name": "MacBook Pro 16",
+      "aspect": "16:10",
+      "category": "16:10",
+      "uiZoom": 1,
+      "note": "16.2in MacBook Pro"
+    },
+    {
+      "width": 3840,
+      "height": 1080,
+      "name": "Dual FHD",
+      "aspect": "32:9",
+      "category": "super-ultrawide",
+      "uiZoom": 1,
+      "inDevEngineLog": false,
+      "note": "49in super-ultrawide"
     },
     {
       "width": 3840,
@@ -306,34 +457,50 @@
       "note": "38in ultrawide"
     },
     {
-      "width": 5120,
+      "width": 3840,
       "height": 2160,
-      "name": "5K2K",
-      "aspect": "21:9",
-      "category": "ultrawide",
+      "name": "4K UHD",
+      "aspect": "16:9",
+      "category": "16:9",
       "uiZoom": 1,
-      "inDevEngineLog": false,
-      "note": "39-52in ultrawide"
-    },
-    {
-      "width": 6144,
-      "height": 2560,
-      "name": "6K ultrawide",
-      "aspect": "12:5",
-      "category": "ultrawide",
-      "uiZoom": 1,
-      "inDevEngineLog": false,
-      "note": "52in class (DisplayNinja best-ultrawide list)"
+      "inDevEngineLog": true,
+      "steamShareAug2026Pct": 5.02
     },
     {
       "width": 3840,
-      "height": 1080,
-      "name": "Dual FHD",
-      "aspect": "32:9",
-      "category": "super-ultrawide",
+      "height": 2400,
+      "name": "WQUXGA",
+      "aspect": "16:10",
+      "category": "16:10",
       "uiZoom": 1,
-      "inDevEngineLog": false,
-      "note": "49in super-ultrawide"
+      "note": "16:10 4K monitors and laptops"
+    },
+    {
+      "width": 4096,
+      "height": 2160,
+      "name": "DCI 4K",
+      "aspect": "17:9",
+      "category": "high-res",
+      "uiZoom": 1,
+      "note": "cinema 4K; some pro monitors"
+    },
+    {
+      "width": 4096,
+      "height": 2304,
+      "name": "4.5K",
+      "aspect": "16:9",
+      "category": "16:9",
+      "uiZoom": 1,
+      "note": "21.5in Retina iMac, LG UltraFine"
+    },
+    {
+      "width": 4480,
+      "height": 2520,
+      "name": "4.5K iMac 24",
+      "aspect": "16:9",
+      "category": "16:9",
+      "uiZoom": 1,
+      "note": "24in iMac"
     },
     {
       "width": 5120,
@@ -347,6 +514,64 @@
       "note": "e.g. Samsung Odyssey G9 49in"
     },
     {
+      "width": 5120,
+      "height": 2160,
+      "name": "5K2K",
+      "aspect": "21:9",
+      "category": "ultrawide",
+      "uiZoom": 1,
+      "inDevEngineLog": false,
+      "note": "39-52in ultrawide"
+    },
+    {
+      "width": 5120,
+      "height": 2880,
+      "name": "5K",
+      "aspect": "16:9",
+      "category": "high-res",
+      "uiZoom": 1,
+      "inDevEngineLog": false,
+      "note": "e.g. 27in 5K gaming/pro monitors"
+    },
+    {
+      "width": 5760,
+      "height": 1080,
+      "name": "Triple FHD",
+      "aspect": "16:3",
+      "category": "super-ultrawide",
+      "uiZoom": 1,
+      "note": "three 1080p monitors in surround"
+    },
+    {
+      "width": 6016,
+      "height": 3384,
+      "name": "6K",
+      "aspect": "16:9",
+      "category": "high-res",
+      "uiZoom": 1,
+      "inDevEngineLog": false,
+      "note": "e.g. 32in 6K creator monitors (Dell, LG, ASUS, Acer)"
+    },
+    {
+      "width": 6144,
+      "height": 2560,
+      "name": "6K ultrawide",
+      "aspect": "12:5",
+      "category": "ultrawide",
+      "uiZoom": 1,
+      "inDevEngineLog": false,
+      "note": "52in class (DisplayNinja best-ultrawide list)"
+    },
+    {
+      "width": 6144,
+      "height": 3456,
+      "name": "6K Pro Display",
+      "aspect": "16:9",
+      "category": "high-res",
+      "uiZoom": 1,
+      "note": "Apple Pro Display XDR 32in"
+    },
+    {
       "width": 7680,
       "height": 2160,
       "name": "Dual UHD (DUHD)",
@@ -355,6 +580,17 @@
       "uiZoom": 1,
       "inDevEngineLog": false,
       "note": "57in class (Samsung buying guide)"
+    },
+    {
+      "width": 7680,
+      "height": 4320,
+      "name": "8K UHD",
+      "aspect": "16:9",
+      "category": "high-res",
+      "uiZoom": 1,
+      "inDevEngineLog": false,
+      "note": "e.g. Dell UP3218K"
     }
-  ]
+  ],
+  "sortedBy": "width, then height"
 }
